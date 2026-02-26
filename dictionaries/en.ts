@@ -1,0 +1,195 @@
+// dictionaries/en.ts
+export const en = {
+  meta: {
+    siteName: 'MEafterMe',
+    siteUrl: 'https://afterme.life',
+  },
+  header: {
+    logo: 'MEafterMe',
+    nav: {
+      experience: { label: 'MEafterMe Experience', sub: 'How it works' },
+      waitlist:   { label: 'Leave a lasting legacy', sub: 'Get started' },
+      demo:       { label: 'Demo', sub: 'Try it' },
+      safety:     { label: 'Safety & Consent', sub: 'Trust' },
+      contact:    { label: 'Contact', sub: 'Talk' },
+    },
+    login:     'Log in',
+    joinWaitlist: 'Join Waitlist',
+  },
+  home: {
+    hero: {
+      headline: "Preserve their stories — so your children can truly know them.",
+      subheadline: "Record real video answers, organize memories, and build a private legacy you can revisit for generations.",
+      ctaPrimary:   'Join Waitlist',
+      ctaSecondary: 'Try the Demo',
+      chips: ['Consent-first', 'Private by default', 'Recorded answers only (v1)'],
+    },
+    howItWorks: {
+      title: 'How it works',
+      steps: [
+        { num: '1', title: 'Choose questions', desc: 'Start with the Starter 100 — curated questions covering life, values, and memories.' },
+        { num: '2', title: 'Record short video answers', desc: 'Record up to 2 minutes per answer, at your own pace.' },
+        { num: '3', title: 'Ask questions — get recorded answers', desc: 'Family members can ask questions and receive real recorded answers.' },
+      ],
+    },
+    whatYouCreate: {
+      title: 'What you create',
+      cards: [
+        { icon: '🎙️', title: 'Interview Studio', desc: 'Starter 100 question plan — the foundation of your legacy.' },
+        { icon: '📁', title: 'Memory Library', desc: 'Photos, videos, and files — organised, tagged, and private.' },
+        { icon: '💬', title: 'Recorded-only Conversation', desc: 'No invented answers. Only what was truly said.' },
+      ],
+    },
+    betaGating: {
+      title: 'Private beta. Limited access.',
+      copy:  'Sign up, enter your invite code, and get approved before creating your legacy.',
+      cta:   'Join Waitlist',
+    },
+  },
+  experience: {
+    title: 'MEafterMe Experience',
+    whatIsTitle: 'What is MEafterMe?',
+    whatIsCopy:  'A private studio to record a life — in real answers.',
+    whatIsBullets: [
+      'Starter 100 question plan',
+      'Short video answers (max 2:00)',
+      'Uploads: photos, videos, files',
+      'Talk plays recorded clips only',
+    ],
+    captureTitle: 'Capture methods',
+    captureCopy:  'Guided interview sessions and direct uploads make it easy to preserve memories in their truest form.',
+    consentTitle: 'Consent-first',
+    consentCopy:  'Creating a legacy requires an uploaded signed consent document. We take responsibility seriously.',
+  },
+  demo: {
+    title: 'Try the interface',
+    subtitle: 'Interactive preview. Video answers will appear here once recorded.',
+    badge:   'Demo mode (no video yet)',
+    chips: [
+      'Where were you born?',
+      'What was your childhood like?',
+      'Who shaped you the most?',
+      'What values guided your life?',
+      'Tell me a story that makes you smile.',
+      'What are you grateful for?',
+      'What should your children remember?',
+      'One message for the future.',
+    ],
+    inputPlaceholder: 'Ask anything…',
+    inputHelper:      'Tip: try a suggested question for the best demo experience.',
+    previewBadge:     'Recorded Answer (preview)',
+    previewTranscript: [
+      '"It was a small village, maybe three hundred people…"',
+      '"We didn\'t have much, but we always had each other."',
+      '"The summers felt endless back then."',
+    ],
+    previewDisclaimer: 'Sample transcript preview. Recorded video answers will appear here once available.',
+    didYouMean:  'Did you mean:',
+    noMatch:     'The demo is limited to suggested questions. Try one of the chips below.',
+    videoSkeleton: 'Video will appear here',
+  },
+  safety: {
+    title: 'Safety & Consent',
+    sections: [
+      {
+        title: 'Consent is required',
+        body: 'Creating a legacy profile requires an uploaded signed consent document (PDF, JPG, or PNG). We store the document, a timestamp, the consent template version, and a hash — forming an auditable evidence trail.',
+      },
+      {
+        title: 'Recorded answers only (v1)',
+        body: 'MEafterMe never invents or generates answers on behalf of anyone. Every reply in Talk mode is a real recorded clip chosen by the profile owner.',
+      },
+      {
+        title: 'Withdrawal & data rights',
+        body: 'Consent can be withdrawn at any time. You may request a full data export or deletion of your legacy profile and all associated recordings.',
+      },
+    ],
+  },
+  contact: {
+    title: 'Contact',
+    subtitle: "We'd love to hear from you.",
+    namePlaceholder:    'Your name',
+    emailPlaceholder:   'Your email',
+    messagePlaceholder: 'Your message',
+    earlyAccess:        'I want early access updates',
+    send:               'Send message',
+    successTitle: "Message sent!",
+    successCopy:  "Thanks for reaching out — we'll get back to you soon.",
+  },
+  privacy: {
+    title: 'Privacy Policy',
+    copy:  'Full privacy policy coming soon. MEafterMe is committed to protecting your personal data and legacy recordings.',
+  },
+  terms: {
+    title: 'Terms of Service',
+    copy:  'Full terms of service coming soon.',
+  },
+  waitlist: {
+    title: 'Join the Waitlist',
+    subtitle: 'Get early access to MEafterMe private beta.',
+    emailPlaceholder: 'Your email address',
+    submit: 'Join Waitlist',
+    statusTitle: "You're on the waitlist!",
+    statusCopy:  "We'll send you an invite code when a spot opens up. Once you receive it, use it at /invite to proceed.",
+    alreadyTitle: 'Already registered.',
+    alreadyCopy:  "You're already on the waitlist. Watch your inbox for an invite code.",
+    nextSteps: [
+      'Watch your inbox for an invite code.',
+      'Enter your code at /invite.',
+      'Get approved and start your legacy.',
+    ],
+  },
+  login: {
+    title: 'Sign in to MEafterMe',
+    subtitle: "Enter your email and we'll send you a magic sign-in link.",
+    emailPlaceholder: 'Your email address',
+    submit: 'Send sign-in link',
+    sentTitle: 'Check your inbox!',
+    sentCopy:  "We've sent a sign-in link to {email}. It expires in 30 minutes.",
+  },
+  invite: {
+    title: 'Enter your invite code',
+    subtitle: 'Have an invite code? Enter it below to request access.',
+    codePlaceholder: 'XXXXXXXX',
+    submit: 'Activate code',
+    invalid: 'This invite code is invalid or has already been used.',
+    needLogin: 'Please sign in first before entering your invite code.',
+  },
+  pending: {
+    title: 'Awaiting approval',
+    subtitle: "Your invite code has been accepted. We'll review your request and approve you shortly.",
+    copy: "You'll receive an email once you're approved. If you have questions, contact us at contact@afterme.life.",
+  },
+  app: {
+    dashboardTitle: 'Owner Studio',
+    createProfileCta: 'Create Legacy Profile',
+    noProfile: "You haven't created a legacy profile yet.",
+    progress: 'Recorded {done}/{total} answers',
+    continueRecording: 'Continue Recording',
+    status: {
+      WAITLISTED: 'Waitlisted',
+      PENDING_APPROVAL: 'Pending Approval',
+      ACTIVE: 'Active',
+    },
+  },
+  admin: {
+    title: 'Admin Panel',
+    pendingUsers: 'Pending Approval',
+    allUsers: 'All Users',
+    inviteCodes: 'Invite Codes',
+    waitlistSignups: 'Waitlist Signups',
+    approveBtn: 'Approve',
+    generateCode: 'Generate Code',
+    noItems: 'None.',
+  },
+  footer: {
+    copy: '© 2026 MEafterMe · afterme.life',
+    links: {
+      privacy: 'Privacy',
+      terms:   'Terms',
+      contact: 'Contact',
+    },
+  },
+};
+
+export type Dict = typeof en;
