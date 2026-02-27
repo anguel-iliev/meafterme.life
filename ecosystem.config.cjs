@@ -8,6 +8,7 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 3000,
+        APP_URL: 'https://3000-if5o3go68dcdg310xzcxy-2b54fc91.sandbox.novita.ai',
       },
       watch: false,
       instances: 1,

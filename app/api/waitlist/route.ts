@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addWaitlistSignup, findOrCreateUser } from '@/lib/auth';
+import { isFirebaseConfigured } from '@/lib/demoStore';
 import { sendWaitlistConfirmEmail } from '@/lib/mailer';
 
 export async function POST(req: NextRequest) {
@@ -10,14 +11,11 @@ export async function POST(req: NextRequest) {
     }
     const normalized = email.toLowerCase().trim();
 
-    // Add to waitlist collection
     const result = await addWaitlistSignup(normalized);
-
-    // Ensure user document exists (WAITLISTED)
     await findOrCreateUser(normalized);
 
-    // Send confirmation email (non-blocking — don't fail on SMTP error)
-    if (result === 'new') {
+    // Only send confirmation email when real SMTP is configured
+    if (result === 'new' && isFirebaseConfigured()) {
       try { await sendWaitlistConfirmEmail(normalized); } catch (e) {
         console.warn('Waitlist email failed:', e);
       }

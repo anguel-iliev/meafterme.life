@@ -8,12 +8,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [demoLink, setDemoLink] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setDemoLink(null);
     try {
       const res = await fetch('/api/auth/send', {
         method: 'POST',
@@ -22,7 +24,13 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error sending link');
-      setSent(true);
+
+      if (data.demo && data.link) {
+        // Demo mode — show clickable link directly
+        setDemoLink(data.link);
+      } else {
+        setSent(true);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -30,6 +38,7 @@ export default function LoginPage() {
     }
   }
 
+  // Production: email sent confirmation
   if (sent) {
     return (
       <div className="max-w-md mx-auto px-4 sm:px-6 py-20 text-center">
@@ -46,6 +55,7 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold text-gray-900 mb-2">{l.title}</h1>
         <p className="text-gray-500 text-sm">{l.subtitle}</p>
       </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           type="email"
@@ -64,6 +74,32 @@ export default function LoginPage() {
           {loading ? '…' : l.submit}
         </button>
       </form>
+
+      {/* Demo mode — show direct sign-in link */}
+      {demoLink && (
+        <div className="mt-6 p-5 bg-amber-50 border border-amber-200 rounded-2xl">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🔑</span>
+            <p className="text-sm font-bold text-amber-800">Demo mode — click to sign in instantly</p>
+          </div>
+          <p className="text-xs text-amber-700 mb-4">
+            No email needed in demo mode. Click the button below to sign in as <strong>{email}</strong>.
+          </p>
+          <a
+            href={demoLink}
+            className="block w-full text-center bg-amber-500 text-white font-bold py-3 rounded-xl hover:bg-amber-600 transition-colors text-sm"
+          >
+            ✓ Sign in to MEafterMe →
+          </a>
+        </div>
+      )}
+
+      {/* Demo hint */}
+      <div className="mt-8 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+        <p className="text-xs text-gray-500 text-center">
+          <span className="font-semibold text-gray-700">Demo mode active</span> — enter any email address to get instant access. No Firebase or SMTP needed.
+        </p>
+      </div>
     </div>
   );
 }

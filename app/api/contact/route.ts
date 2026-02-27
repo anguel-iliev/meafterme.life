@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/firebase';
+import { isFirebaseConfigured, demoAddContactMessage } from '@/lib/demoStore';
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,11 +7,17 @@ export async function POST(req: NextRequest) {
     if (!name || !email || !message) {
       return NextResponse.json({ error: 'All fields required' }, { status: 400 });
     }
+
+    if (!isFirebaseConfigured()) {
+      // Demo mode — store in memory
+      demoAddContactMessage({ name, email, message, earlyAccess: !!earlyAccess });
+      return NextResponse.json({ ok: true });
+    }
+
+    const { getDb } = await import('@/lib/firebase');
     const db = getDb();
     await db.collection('contact_messages').add({
-      name,
-      email,
-      message,
+      name, email, message,
       earlyAccess: !!earlyAccess,
       createdAt: new Date(),
     });
