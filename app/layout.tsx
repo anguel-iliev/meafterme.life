@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { LangProvider } from '@/components/LangContext';
+import { AuthProvider } from '@/components/AuthContext';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 

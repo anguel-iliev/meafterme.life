@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import type { SessionUser } from '@/lib/session';
+import type { AppUser as SessionUser } from '@/lib/clientStore';
 import { en } from '@/dictionaries/en';
 import Link from 'next/link';
 
