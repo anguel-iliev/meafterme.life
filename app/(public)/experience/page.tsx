@@ -3,74 +3,106 @@ import React from 'react';
 import { useLang } from '@/components/LangContext';
 import Link from 'next/link';
 
+const darkStyle = { backgroundColor: 'hsl(30 15% 7%)', color: 'hsl(38 50% 92%)' };
+const cardStyle = { background: 'linear-gradient(135deg, hsl(30 12% 11%) 0%, hsl(30 10% 14%) 100%)', border: '1px solid hsl(30 10% 18%)', boxShadow: '0 8px 32px -8px hsl(0 0% 0% / 0.4)' };
+const amber = 'hsl(36 80% 55%)';
+const cream = 'hsl(38 50% 92%)';
+const dimmed = 'hsl(38 50% 92% / 0.6)';
+
 export default function ExperiencePage() {
-  const { dict } = useLang();
+  const { dict, locale } = useLang();
   const e = dict.experience;
+  const isBg = locale === 'bg';
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">{e.title}</h1>
-      <p className="text-gray-500 text-lg mb-12 border-b border-gray-100 pb-8">
-        A private studio to record a life — in real answers.
-      </p>
+    <div style={darkStyle} className="min-h-screen">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
 
-      {/* What is MEafterMe */}
-      <section className="mb-12">
-        <h2 className="text-2xl font-bold text-gray-900 mb-3">{e.whatIsTitle}</h2>
-        <p className="text-gray-700 text-lg mb-6">{e.whatIsCopy}</p>
-        <ul className="space-y-3">
-          {e.whatIsBullets.map((bullet) => (
-            <li key={bullet} className="flex items-start gap-3 text-gray-700">
-              <span className="mt-1 w-5 h-5 rounded-full bg-brand-600 flex-shrink-0 flex items-center justify-center">
-                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </span>
-              <span>{bullet}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* Capture methods */}
-      <section className="mb-12 bg-brand-50 rounded-2xl p-8 border border-brand-100">
-        <h2 className="text-xl font-bold text-brand-800 mb-3">{e.captureTitle}</h2>
-        <p className="text-brand-700 leading-relaxed">{e.captureCopy}</p>
-      </section>
-
-      {/* Consent first */}
-      <section className="mb-12 bg-warm-50 rounded-2xl p-8 border border-warm-200">
-        <h2 className="text-xl font-bold text-warm-800 mb-3">🔒 {e.consentTitle}</h2>
-        <p className="text-warm-700 leading-relaxed">{e.consentCopy}</p>
-      </section>
-
-      {/* Step flow visual */}
-      <section className="mb-12">
-        <h2 className="text-xl font-bold text-gray-900 mb-6">The Studio flow</h2>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          {['Create Profile', 'Consent Upload', 'Starter 100', 'Record Answers', 'Family Asks'].map((step, i) => (
-            <React.Fragment key={step}>
-              <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm min-w-0 flex-1">
-                <div className="w-8 h-8 rounded-full bg-brand-600 text-white text-sm font-bold flex-shrink-0 flex items-center justify-center">
-                  {i + 1}
-                </div>
-                <span className="text-sm font-medium text-gray-800 leading-tight">{step}</span>
-              </div>
-              {i < 4 && <div className="hidden sm:block text-gray-300 text-xl font-light flex-shrink-0">→</div>}
-            </React.Fragment>
-          ))}
+        {/* Header */}
+        <div className="mb-16">
+          <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-body font-medium tracking-widest uppercase mb-6"
+                style={{ backgroundColor: 'hsl(36 80% 55% / 0.1)', color: amber, border: '1px solid hsl(36 80% 55% / 0.2)' }}>
+            ✨ {isBg ? 'Как работи' : 'How it works'}
+          </span>
+          <h1 className="font-display text-4xl sm:text-5xl font-bold mb-4" style={{ color: cream }}>
+            {e.title}
+          </h1>
+          <p className="font-body text-xl leading-relaxed" style={{ color: dimmed }}>
+            {e.whatIsCopy}
+          </p>
         </div>
-      </section>
 
-      <div className="flex flex-wrap gap-4">
-        <Link href="/waitlist"
-          className="bg-brand-600 text-white font-bold px-7 py-3 rounded-xl hover:bg-brand-700 transition-colors">
-          {dict.home.betaGating.cta}
-        </Link>
-        <Link href="/demo"
-          className="border border-brand-300 text-brand-700 font-semibold px-7 py-3 rounded-xl hover:bg-brand-50 transition-colors">
-          {dict.header.nav.demo.label}
-        </Link>
+        {/* What is MEafterMe */}
+        <section className="mb-12">
+          <h2 className="font-display text-2xl font-bold mb-4" style={{ color: cream }}>{e.whatIsTitle}</h2>
+          <ul className="space-y-4">
+            {e.whatIsBullets.map((bullet) => (
+              <li key={bullet} className="flex items-start gap-3 font-body" style={{ color: dimmed }}>
+                <span className="mt-0.5 w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold"
+                      style={{ backgroundColor: 'hsl(36 80% 55% / 0.15)', color: amber }}>
+                  ✓
+                </span>
+                <span className="text-base leading-relaxed">{bullet}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* Capture methods */}
+        <section className="mb-8 p-8 rounded-2xl" style={cardStyle}>
+          <h2 className="font-display text-xl font-bold mb-3" style={{ color: amber }}>
+            🎙️ {e.captureTitle}
+          </h2>
+          <p className="font-body leading-relaxed" style={{ color: dimmed }}>{e.captureCopy}</p>
+        </section>
+
+        {/* Consent first */}
+        <section className="mb-12 p-8 rounded-2xl" style={{ ...cardStyle, border: '1px solid hsl(36 80% 55% / 0.3)' }}>
+          <h2 className="font-display text-xl font-bold mb-3" style={{ color: amber }}>
+            🔒 {e.consentTitle}
+          </h2>
+          <p className="font-body leading-relaxed" style={{ color: dimmed }}>{e.consentCopy}</p>
+        </section>
+
+        {/* Step flow */}
+        <section className="mb-12">
+          <h2 className="font-display text-xl font-bold mb-6" style={{ color: cream }}>
+            {isBg ? 'Студийният процес' : 'The Studio flow'}
+          </h2>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            {(isBg
+              ? ['Създай профил', 'Качи съгласие', 'Starter 100', 'Запиши отговори', 'Семейството пита']
+              : ['Create Profile', 'Consent Upload', 'Starter 100', 'Record Answers', 'Family Asks']
+            ).map((step, i, arr) => (
+              <React.Fragment key={step}>
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl min-w-0 flex-1" style={cardStyle}>
+                  <div className="w-8 h-8 rounded-full text-sm font-bold flex-shrink-0 flex items-center justify-center font-body"
+                       style={{ backgroundColor: 'hsl(36 80% 55% / 0.2)', color: amber }}>
+                    {i + 1}
+                  </div>
+                  <span className="font-body text-sm font-medium leading-tight" style={{ color: cream }}>{step}</span>
+                </div>
+                {i < arr.length - 1 && (
+                  <div className="hidden sm:block text-xl flex-shrink-0" style={{ color: 'hsl(30 10% 30%)' }}>→</div>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </section>
+
+        {/* CTAs */}
+        <div className="flex flex-wrap gap-4">
+          <Link href="/login"
+            className="font-body font-bold px-7 py-3 rounded-full transition-all hover:scale-105"
+            style={{ backgroundColor: amber, color: 'hsl(30 15% 7%)' }}>
+            {isBg ? 'Започни безплатно' : 'Start for free'}
+          </Link>
+          <Link href="/demo"
+            className="font-body font-semibold px-7 py-3 rounded-full transition-all"
+            style={{ backgroundColor: 'hsl(30 12% 11%)', color: cream, border: '1px solid hsl(30 10% 18%)' }}>
+            {dict.header.nav.demo.label}
+          </Link>
+        </div>
       </div>
     </div>
   );

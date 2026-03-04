@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "vectors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid",       "order": "ASCENDING" },
+        { "fieldPath": "memoryId",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "answers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid",        "order": "ASCENDING" },
+        { "fieldPath": "questionId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "profile_shares",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid",         "order": "ASCENDING" },
+        { "fieldPath": "sharedWithEmail",  "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

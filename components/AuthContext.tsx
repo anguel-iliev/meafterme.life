@@ -1,7 +1,9 @@
 'use client';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { AppUser } from '@/lib/clientStore';
-import { getCurrentUser, clearCurrentUser } from '@/lib/clientStore';
+import { getCurrentUser, clearCurrentUser, findOrCreateClientUserByUid, saveCurrentUser, signOutUser } from '@/lib/clientStore';
+import { isFirebaseClientConfigured, getClientAuth } from '@/lib/firebaseClient';
+import { onAuthStateChanged } from 'firebase/auth';
 
 interface AuthContextValue {
   user: AppUser | null;
@@ -20,18 +22,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load from localStorage on mount
-    const u = getCurrentUser();
-    setUserState(u);
-    setLoading(false);
+    if (isFirebaseClientConfigured()) {
+      const auth = getClientAuth();
+      const unsub = onAuthStateChanged(auth, async (fbUser) => {
+        if (fbUser && fbUser.emailVerified) {
+          try {
+            const appUser = await findOrCreateClientUserByUid(fbUser.uid, fbUser.email!);
+            saveCurrentUser(appUser);
+            setUserState(appUser);
+          } catch {
+            setUserState(getCurrentUser());
+          }
+        } else if (fbUser && !fbUser.emailVerified) {
+          setUserState(null);
+        } else {
+          setUserState(getCurrentUser());
+        }
+        setLoading(false);
+      });
+      return () => unsub();
+    } else {
+      setUserState(getCurrentUser());
+      setLoading(false);
+    }
   }, []);
 
-  const setUser = useCallback((u: AppUser | null) => {
-    setUserState(u);
-  }, []);
+  const setUser = useCallback((u: AppUser | null) => setUserState(u), []);
 
-  const logout = useCallback(() => {
-    clearCurrentUser();
+  const logout = useCallback(async () => {
+    await signOutUser();
     setUserState(null);
   }, []);
 

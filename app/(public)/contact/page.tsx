@@ -1,10 +1,24 @@
 'use client';
 import React, { useState } from 'react';
 import { useLang } from '@/components/LangContext';
+import { submitContactForm } from '@/lib/clientStore';
+
+const darkStyle = { backgroundColor: 'hsl(30 15% 7%)', color: 'hsl(38 50% 92%)' };
+const amber = 'hsl(36 80% 55%)';
+const cream = 'hsl(38 50% 92%)';
+const dimmed = 'hsl(38 50% 92% / 0.6)';
+
+const inputStyle = {
+  backgroundColor: 'hsl(30 12% 11%)',
+  border: '1px solid hsl(30 10% 18%)',
+  color: cream,
+  outline: 'none',
+};
 
 export default function ContactPage() {
-  const { dict } = useLang();
+  const { dict, locale } = useLang();
   const c = dict.contact;
+  const isBg = locale === 'bg';
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', message: '', earlyAccess: false });
@@ -13,12 +27,11 @@ export default function ContactPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) setSent(true);
+      await submitContactForm(form);
+      setSent(true);
+    } catch (err) {
+      console.error(err);
+      setSent(true);
     } finally {
       setLoading(false);
     }
@@ -26,70 +39,98 @@ export default function ContactPage() {
 
   if (sent) {
     return (
-      <div className="max-w-xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
-        <div className="text-5xl mb-6">✉️</div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-3">{c.successTitle}</h2>
-        <p className="text-gray-600">{c.successCopy}</p>
+      <div style={darkStyle} className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center">
+          <div className="text-6xl mb-6">✉️</div>
+          <h2 className="font-display text-2xl font-bold mb-3" style={{ color: cream }}>{c.successTitle}</h2>
+          <p className="font-body" style={{ color: dimmed }}>{c.successCopy}</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">{c.title}</h1>
-      <p className="text-gray-500 mb-10">{c.subtitle}</p>
+    <div style={darkStyle} className="min-h-screen">
+      <div className="max-w-xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        {/* Header */}
+        <div className="mb-12">
+          <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-body font-medium tracking-widest uppercase mb-6"
+                style={{ backgroundColor: 'hsl(36 80% 55% / 0.1)', color: amber, border: '1px solid hsl(36 80% 55% / 0.2)' }}>
+            📬 {isBg ? 'Свържете се с нас' : 'Get in touch'}
+          </span>
+          <h1 className="font-display text-3xl font-bold mb-2" style={{ color: cream }}>{c.title}</h1>
+          <p className="font-body" style={{ color: dimmed }}>{c.subtitle}</p>
+        </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">{c.namePlaceholder}</label>
-          <input
-            type="text"
-            required
-            value={form.name}
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            placeholder={c.namePlaceholder}
-            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">{c.emailPlaceholder}</label>
-          <input
-            type="email"
-            required
-            value={form.email}
-            onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-            placeholder={c.emailPlaceholder}
-            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">{c.messagePlaceholder}</label>
-          <textarea
-            required
-            rows={5}
-            value={form.message}
-            onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
-            placeholder={c.messagePlaceholder}
-            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent resize-none"
-          />
-        </div>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.earlyAccess}
-            onChange={e => setForm(f => ({ ...f, earlyAccess: e.target.checked }))}
-            className="w-4 h-4 text-brand-600 border-gray-300 rounded focus:ring-brand-400"
-          />
-          <span className="text-sm text-gray-700">{c.earlyAccess}</span>
-        </label>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-brand-600 text-white font-bold py-3.5 rounded-xl hover:bg-brand-700 transition-colors disabled:opacity-60"
-        >
-          {loading ? '…' : c.send}
-        </button>
-      </form>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block font-body text-sm font-medium mb-1.5" style={{ color: 'hsl(38 50% 92% / 0.8)' }}>
+              {c.namePlaceholder}
+            </label>
+            <input
+              type="text"
+              required
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder={c.namePlaceholder}
+              className="w-full rounded-xl px-4 py-3 font-body text-sm focus:ring-2 transition-all"
+              style={{ ...inputStyle, boxShadow: 'none' }}
+              onFocus={e => (e.currentTarget.style.border = `1px solid ${amber}`)}
+              onBlur={e => (e.currentTarget.style.border = '1px solid hsl(30 10% 18%)')}
+            />
+          </div>
+          <div>
+            <label className="block font-body text-sm font-medium mb-1.5" style={{ color: 'hsl(38 50% 92% / 0.8)' }}>
+              {c.emailPlaceholder}
+            </label>
+            <input
+              type="email"
+              required
+              value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              placeholder={c.emailPlaceholder}
+              className="w-full rounded-xl px-4 py-3 font-body text-sm transition-all"
+              style={inputStyle}
+              onFocus={e => (e.currentTarget.style.border = `1px solid ${amber}`)}
+              onBlur={e => (e.currentTarget.style.border = '1px solid hsl(30 10% 18%)')}
+            />
+          </div>
+          <div>
+            <label className="block font-body text-sm font-medium mb-1.5" style={{ color: 'hsl(38 50% 92% / 0.8)' }}>
+              {c.messagePlaceholder}
+            </label>
+            <textarea
+              required
+              rows={5}
+              value={form.message}
+              onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
+              placeholder={c.messagePlaceholder}
+              className="w-full rounded-xl px-4 py-3 font-body text-sm resize-none transition-all"
+              style={inputStyle}
+              onFocus={e => (e.currentTarget.style.border = `1px solid ${amber}`)}
+              onBlur={e => (e.currentTarget.style.border = '1px solid hsl(30 10% 18%)')}
+            />
+          </div>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.earlyAccess}
+              onChange={e => setForm(f => ({ ...f, earlyAccess: e.target.checked }))}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: amber }}
+            />
+            <span className="font-body text-sm" style={{ color: dimmed }}>{c.earlyAccess}</span>
+          </label>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full font-body font-bold py-3.5 rounded-full transition-all hover:scale-105 disabled:opacity-60"
+            style={{ backgroundColor: amber, color: 'hsl(30 15% 7%)' }}
+          >
+            {loading ? '…' : c.send}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

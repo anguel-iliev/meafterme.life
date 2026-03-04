@@ -11,12 +11,24 @@ out/
 build/
 dist/
 
-# Environment variables (NEVER commit)
+# Environment variables (NEVER commit these)
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+*.env
+
+# Firebase local emulator data
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+functions/.runtimeconfig.json
+
+# Cloud Functions build output (generated — don't commit)
+functions/lib/
+functions/node_modules/
 
 # Debug
 npm-debug.log*
@@ -40,3 +52,16 @@ next-env.d.ts
 pids/
 logs/
 *.log
+
+# ZIP files
+*.zip
+
+
+# Build output
+out/
+.next/
+
+# Environment
+.env
+.env.local
+.dev.vars

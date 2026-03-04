@@ -1,9 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Inter:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --font-inter: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --background: 30 15% 7%;
+  --foreground: 38 50% 92%;
+  --card: 30 12% 11%;
+  --card-foreground: 38 50% 92%;
+  --popover: 30 12% 11%;
+  --popover-foreground: 38 50% 92%;
+  --primary: 36 80% 55%;
+  --primary-foreground: 30 15% 7%;
+  --secondary: 30 10% 16%;
+  --secondary-foreground: 38 40% 80%;
+  --muted: 30 8% 14%;
+  --muted-foreground: 30 15% 50%;
+  --accent: 36 80% 55%;
+  --accent-foreground: 30 15% 7%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 30 10% 18%;
+  --input: 30 10% 18%;
+  --ring: 36 80% 55%;
+  --radius: 0.75rem;
+  --amber-glow: 36 90% 60%;
+  --warm-cream: 38 50% 92%;
+  --deep-charcoal: 30 15% 7%;
+  --soft-sepia: 30 20% 30%;
+  --hero-gradient: linear-gradient(180deg, hsl(30 15% 7%) 0%, hsl(30 12% 11%) 100%);
+  --card-gradient: linear-gradient(135deg, hsl(30 12% 11%) 0%, hsl(30 10% 14%) 100%);
+  --text-gradient: linear-gradient(135deg, hsl(36 80% 55%) 0%, hsl(38 50% 92%) 100%);
+  --glow-shadow: 0 0 60px -10px hsl(36 80% 55% / 0.2);
+  --card-shadow: 0 8px 32px -8px hsl(0 0% 0% / 0.4);
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+* {
+  border-color: hsl(var(--border));
 }
 
 html {
@@ -11,14 +47,33 @@ html {
 }
 
 body {
-  font-family: var(--font-inter);
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}
+
+/* Text gradient utility */
+.text-gradient {
+  background: var(--text-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glow orb */
+.glow-orb {
+  background: radial-gradient(circle, hsl(var(--primary) / 0.15), transparent 70%);
+}
+
 /* Video skeleton animation */
 .video-skeleton {
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--secondary)) 50%, hsl(var(--muted)) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.6s infinite;
 }
@@ -28,14 +83,15 @@ body {
   100% { background-position: -200% 0; }
 }
 
-/* Demo chip hover */
+/* Demo chip */
 .demo-chip {
-  @apply border border-brand-200 text-brand-700 bg-white hover:bg-brand-50 hover:border-brand-400
-         rounded-full px-4 py-2 text-sm font-medium cursor-pointer transition-all duration-150
-         text-left;
+  @apply border border-[hsl(36_80%_55%_/_0.3)] text-[hsl(38_50%_92%_/_0.8)] bg-[hsl(30_12%_11%)] 
+         hover:bg-[hsl(36_80%_55%_/_0.1)] hover:border-[hsl(36_80%_55%_/_0.6)] hover:text-[hsl(38_50%_92%)]
+         rounded-full px-4 py-2 text-sm font-medium cursor-pointer transition-all duration-150 text-left;
 }
+
 .demo-chip.active {
-  @apply bg-brand-600 text-white border-brand-600;
+  @apply bg-[hsl(36_80%_55%)] text-[hsl(30_15%_7%)] border-[hsl(36_80%_55%)];
 }
 
 /* Nav sublabel */
@@ -48,5 +104,31 @@ body {
 
 /* Sticky header transition */
 .header-scrolled {
-  @apply bg-white/95 backdrop-blur-sm shadow-sm;
+  background-color: hsl(var(--background) / 0.95);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 hsl(var(--border));
+}
+
+/* Card styling */
+.card-dark {
+  background: var(--card-gradient);
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--card-shadow);
+}
+
+/* Section separators */
+.section-dark {
+  background-color: hsl(var(--background));
+}
+.section-card {
+  background-color: hsl(var(--card));
+}
+
+/* Pulse glow animation */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1; }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
 }

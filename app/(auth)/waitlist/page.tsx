@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useLang } from '@/components/LangContext';
 import Link from 'next/link';
+import { addToWaitlist } from '@/lib/clientStore';
 
 export default function WaitlistPage() {
   const { dict } = useLang();
@@ -16,16 +17,10 @@ export default function WaitlistPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error');
-      setResult(data.result);
+      const res = await addToWaitlist(email);
+      setResult(res);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error joining waitlist');
     } finally {
       setLoading(false);
     }
@@ -64,7 +59,6 @@ export default function WaitlistPage() {
 
   return (
     <div className="max-w-xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      {/* Hero */}
       <div className="text-center mb-10">
         <div className="inline-block bg-brand-600 text-white text-xs font-bold px-3 py-1.5 rounded-full mb-4 uppercase tracking-wide">
           Private Beta

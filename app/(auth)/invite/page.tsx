@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useLang } from '@/components/LangContext';
 import { useRouter } from 'next/navigation';
+import { redeemInviteCode, getCurrentUser } from '@/lib/clientStore';
 
 export default function InvitePage() {
   const { dict } = useLang();
@@ -16,18 +17,18 @@ export default function InvitePage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || inv.invalid);
-      if (data.status === 'PENDING_APPROVAL') {
-        router.push('/pending');
+      const user = getCurrentUser();
+      const email = user?.email || 'demo@afterme.life';
+      const result = await redeemInviteCode(code, email);
+      if (result === 'ok') {
+        router.push('/pending/');
+      } else if (result === 'used') {
+        setError('This invite code has already been used.');
+      } else {
+        setError(inv.invalid || 'Invalid invite code.');
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Error redeeming code');
     } finally {
       setLoading(false);
     }
@@ -58,6 +59,9 @@ export default function InvitePage() {
           {loading ? '…' : inv.submit}
         </button>
       </form>
+      <p className="text-center text-xs text-gray-400 mt-6">
+        Demo code: <strong className="font-mono">DEMO2026</strong>
+      </p>
     </div>
   );
 }

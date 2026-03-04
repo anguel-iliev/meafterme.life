@@ -1,38 +1,38 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/components/AuthContext';
+import { getCurrentUser, type AppUser } from '@/lib/clientStore';
 import AppDashboard from './AppDashboard';
 
 export default function AppPage() {
-  const { user, loading } = useAuth();
   const router = useRouter();
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (loading) return;
-    if (!user) {
+    const u = getCurrentUser();
+    if (!u) {
       router.replace('/login/');
       return;
     }
-    if (user.status === 'PENDING_APPROVAL') {
+    if (u.status === 'PENDING_APPROVAL') {
       router.replace('/pending/');
       return;
     }
-    if (user.status === 'WAITLISTED') {
-      router.replace('/invite/');
-      return;
-    }
-  }, [user, loading, router]);
+    setUser(u);
+    setChecked(true);
+  }, [router]);
 
-  if (loading) {
+  if (!checked || !user) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <div className="text-white/60 text-lg animate-pulse">Loading...</div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+          <p className="text-white/50 text-sm">Loading…</p>
+        </div>
       </div>
     );
   }
-
-  if (!user || user.status !== 'ACTIVE') return null;
 
   return <AppDashboard user={user} />;
 }
