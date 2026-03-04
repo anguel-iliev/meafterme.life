@@ -60,6 +60,8 @@ export interface MemoryItem {
   size: number;          // bytes
   mimeType: string;
   createdAt: string;     // ISO string
+  // Avatar reference: marks this file as a reference for the AI avatar
+  usage?: 'avatar_reference' | null;
 }
 
 // ─── Email / Password Registration ────────────────────────────────────────────
@@ -404,6 +406,7 @@ export async function getMemoryItems(uid: string): Promise<MemoryItem[]> {
     size: d.data().size || 0,
     mimeType: d.data().mimeType || '',
     createdAt: d.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    usage: d.data().usage || null,
   }));
   // Sort client-side (newest first) to avoid requiring a composite Firestore index
   return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -433,6 +436,26 @@ export async function deleteMemoryItem(item: MemoryItem): Promise<void> {
 export async function deleteAllMemoryItems(uid: string): Promise<void> {
   const items = await getMemoryItems(uid);
   await Promise.all(items.map(item => deleteMemoryItem(item)));
+}
+
+/**
+ * Set or clear avatar_reference usage on a memory item.
+ * Stores { usage: "avatar_reference" } or { usage: null } in Firestore.
+ */
+export async function setMemoryUsage(
+  item: MemoryItem,
+  usage: 'avatar_reference' | null
+): Promise<void> {
+  if (!isFirebaseClientConfigured()) {
+    // Demo mode — update localStorage
+    const key = `demo_memories_${item.uid}`;
+    const list: MemoryItem[] = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = list.map(m => m.id === item.id ? { ...m, usage } : m);
+    localStorage.setItem(key, JSON.stringify(updated));
+    return;
+  }
+  const db = getClientDb();
+  await updateDoc(doc(db, 'memories', item.id), { usage });
 }
 
 /**
@@ -801,6 +824,74 @@ export async function createInviteCode(code?: string): Promise<string> {
   return finalCode;
 }
 export async function getInviteCodes(): Promise<{ code: string; used: boolean; usedByEmail?: string }[]> { return []; }
+
+// ─── Avatar Config ────────────────────────────────────────────────────────────
+
+export interface AvatarConfig {
+  uid: string;
+  // Reference photo for D-ID (face image)
+  photoMemoryId?: string;
+  photoUrl?: string;
+  photoName?: string;
+  // Reference audio for ElevenLabs voice clone
+  audioMemoryId?: string;
+  audioUrl?: string;
+  audioName?: string;
+  audioStoragePath?: string;
+  // ElevenLabs voice clone result
+  voiceId?: string;
+  voiceStatus?: 'pending' | 'ready' | 'error';
+  // Status
+  setupComplete?: boolean;
+  updatedAt?: string;
+}
+
+/** Save avatar config for a user */
+export async function saveAvatarConfig(uid: string, config: Partial<AvatarConfig>): Promise<void> {
+  const key = `avatar_config_${uid}`;
+  if (!isFirebaseClientConfigured()) {
+    const existing = JSON.parse(localStorage.getItem(key) || '{}');
+    localStorage.setItem(key, JSON.stringify({ ...existing, ...config, uid, updatedAt: new Date().toISOString() }));
+    return;
+  }
+  const firebaseUser = await waitForAuthReady();
+  const realUid = firebaseUser?.uid ?? uid;
+  const db = getClientDb();
+  await setDoc(doc(db, 'avatar_configs', realUid), {
+    ...config,
+    uid: realUid,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+}
+
+/** Get avatar config for a user */
+export async function getAvatarConfig(uid: string): Promise<AvatarConfig | null> {
+  const key = `avatar_config_${uid}`;
+  if (!isFirebaseClientConfigured()) {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : null;
+  }
+  const firebaseUser = await waitForAuthReady();
+  const realUid = firebaseUser?.uid ?? uid;
+  const db = getClientDb();
+  const snap = await getDoc(doc(db, 'avatar_configs', realUid));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  return {
+    uid: d.uid,
+    photoMemoryId: d.photoMemoryId,
+    photoUrl: d.photoUrl,
+    photoName: d.photoName,
+    audioMemoryId: d.audioMemoryId,
+    audioUrl: d.audioUrl,
+    audioName: d.audioName,
+    audioStoragePath: d.audioStoragePath,
+    voiceId: d.voiceId,
+    voiceStatus: d.voiceStatus,
+    setupComplete: d.setupComplete,
+    updatedAt: d.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+  };
+}
 
 // Legacy stubs
 export async function sendMagicLink(email: string): Promise<{ demo?: boolean; link?: string }> { return {}; }

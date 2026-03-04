@@ -15,6 +15,7 @@ import {
   QUESTIONS_PER_PAGE, TOTAL_QUESTIONS,
 } from '@/lib/questions';
 import AvatarChat from '@/components/AvatarChat';
+import AvatarSetup from '@/components/AvatarSetup';
 
 // ─── i18n ──────────────────────────────────────────────────────────────────────
 const i18n = {
@@ -25,6 +26,7 @@ const i18n = {
     questions:   '📝 Life Questions',
     sharing:     '🔗 Sharing',
     avatar:      '🤖 AI Avatar',
+    avatarSetup: '🎬 Avatar Setup',
     signOut:     'Sign Out',
     deleteProfile: '🗑 Delete Profile',
     // Multimedia
@@ -90,6 +92,7 @@ const i18n = {
     questions:   '📝 Житейски въпроси',
     sharing:     '🔗 Споделяне',
     avatar:      '🤖 AI Аватар',
+    avatarSetup: '🎬 Настройка на аватар',
     signOut:     'Изход',
     deleteProfile: '🗑 Изтрий профила',
     addMemory:   '⬆ Качи спомен',
@@ -830,7 +833,7 @@ function DeleteProfileModal({ user, onClose, onDeleted, t }: { user: AppUser; on
 }
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
-type Tab = 'multimedia' | 'questions' | 'sharing' | 'avatar';
+type Tab = 'multimedia' | 'questions' | 'sharing' | 'avatar' | 'avatarSetup';
 
 export default function AppDashboard({ user }: { user: AppUser }) {
   const { locale } = useLang();
@@ -843,7 +846,8 @@ export default function AppDashboard({ user }: { user: AppUser }) {
     { key: 'multimedia', label: t.multimedia, icon: '📁' },
     { key: 'questions',  label: t.questions,  icon: '📝' },
     { key: 'sharing',    label: t.sharing,    icon: '🔗' },
-    { key: 'avatar',     label: (t as any).avatar || '🤖 AI Avatar', icon: '🤖' },
+    { key: 'avatarSetup', label: (t as any).avatarSetup || '🎬 Avatar Setup', icon: '🎬' },
+    { key: 'avatar',      label: (t as any).avatar    || '🤖 AI Avatar',    icon: '🤖' },
   ];
 
   return (
@@ -950,6 +954,9 @@ export default function AppDashboard({ user }: { user: AppUser }) {
           {activeTab === 'multimedia' && <MultimediaTab user={user} t={t} locale={locale} />}
           {activeTab === 'questions'  && <QuestionsTab  user={user} t={t} locale={locale} />}
           {activeTab === 'sharing'    && <SharingTab    user={user} t={t} />}
+          {activeTab === 'avatarSetup' && (
+            <AvatarSetup user={user} ownerUid={getAuthUid() || user.uid} />
+          )}
           {/* AvatarChat is always mounted but hidden when not active — preserves conversation state */}
           <div style={{ display: activeTab === 'avatar' ? 'block' : 'none' }}>
             <AvatarChat

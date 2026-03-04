@@ -23,8 +23,10 @@ const db  = getFirestore();
 const gcs = getStorage();
 
 // ─── Secrets (stored in Firebase Secret Manager, never in client bundle) ──────
-const OPENAI_API_KEY    = defineSecret('OPENAI_API_KEY');
-const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
+const OPENAI_API_KEY      = defineSecret('OPENAI_API_KEY');
+const ANTHROPIC_API_KEY   = defineSecret('ANTHROPIC_API_KEY');
+const ELEVENLABS_API_KEY  = defineSecret('ELEVENLABS_API_KEY');
+const DID_API_KEY         = defineSecret('DID_API_KEY');
 
 // ─── Chunking config ──────────────────────────────────────────────────────────
 const CHUNK_SIZE    = 500;   // characters per chunk
@@ -515,3 +517,335 @@ ${answersContext || '(No answers filled in yet)'}
 
 Now answer the question based solely on the above.`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FUNCTION 5: cloneVoice
+// HTTPS Callable — clones voice using ElevenLabs from audio file in Storage
+// Returns: voiceId to save in user's avatar_config
+// ═══════════════════════════════════════════════════════════════════════════════
+export const cloneVoice = onCall(
+  {
+    secrets: [ELEVENLABS_API_KEY],
+    timeoutSeconds: 300,
+    memory: '1GiB',
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
+
+    const { audioStoragePath, voiceName } = request.data as {
+      audioStoragePath: string;
+      voiceName: string;
+    };
+
+    if (!audioStoragePath) throw new HttpsError('invalid-argument', 'audioStoragePath is required.');
+
+    const uid = request.auth.uid;
+
+    try {
+      // 1. Download audio from Firebase Storage
+      const bucket = gcs.bucket();
+      const file   = bucket.file(audioStoragePath);
+      const [buffer] = await file.download();
+      const [meta]   = await file.getMetadata();
+      const mimeType  = (meta.contentType as string) || 'audio/mp3';
+      const fileName  = audioStoragePath.split('/').pop() || 'voice.mp3';
+
+      // 2. Check if a voice already exists for this user — delete it first (free plan limit)
+      const userConfigRef = db.collection('avatar_configs').doc(uid);
+      const configSnap    = await userConfigRef.get();
+      const existingVoiceId = configSnap.data()?.voiceId;
+
+      if (existingVoiceId) {
+        try {
+          await fetch(`https://api.elevenlabs.io/v1/voices/${existingVoiceId}`, {
+            method: 'DELETE',
+            headers: { 'xi-api-key': ELEVENLABS_API_KEY.value() },
+          });
+          functions.logger.info(`🗑 Deleted old ElevenLabs voice: ${existingVoiceId}`);
+        } catch (e) {
+          functions.logger.warn('Could not delete old voice:', e);
+        }
+      }
+
+      // 3. Upload to ElevenLabs Voice Clone API
+      const formData = new FormData();
+      formData.append('name', voiceName || `MEafterMe_${uid.slice(0, 8)}`);
+      formData.append('description', 'Voice clone for MEafterMe digital avatar');
+      const blob = new Blob([buffer], { type: mimeType });
+      formData.append('files', blob, fileName);
+
+      const elResp = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+        method: 'POST',
+        headers: { 'xi-api-key': ELEVENLABS_API_KEY.value() },
+        body: formData,
+      });
+
+      if (!elResp.ok) {
+        const errText = await elResp.text();
+        throw new Error(`ElevenLabs error ${elResp.status}: ${errText.slice(0, 300)}`);
+      }
+
+      const elData = await elResp.json() as { voice_id: string };
+      const voiceId = elData.voice_id;
+
+      // 4. Save voiceId to Firestore avatar_config
+      await userConfigRef.set({
+        uid,
+        voiceId,
+        voiceStatus: 'ready',
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      functions.logger.info(`✅ Voice cloned for user ${uid}: voiceId=${voiceId}`);
+      return { voiceId, status: 'ready' };
+
+    } catch (err) {
+      functions.logger.error('❌ Voice clone error:', err);
+      // Save error status
+      await db.collection('avatar_configs').doc(uid).set({
+        voiceStatus: 'error',
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      throw new HttpsError('internal', `Voice clone failed: ${String(err)}`);
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FUNCTION 6: generateAvatarVideo
+// HTTPS Callable — main pipeline:
+//   1. Get answer text from Gemini (RAG-based)
+//   2. Generate audio via ElevenLabs with cloned voice
+//   3. Send photo + audio to D-ID to create talking avatar video
+//   4. Return video URL
+// ═══════════════════════════════════════════════════════════════════════════════
+export const generateAvatarVideo = onCall(
+  {
+    secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
+    timeoutSeconds: 180,
+    memory: '512MiB',
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
+
+    const {
+      question,
+      ownerUid,
+      ownerName = 'this person',
+      language  = 'bg',
+    } = request.data as {
+      question:   string;
+      ownerUid:   string;
+      ownerName?: string;
+      language?:  string;
+    };
+
+    if (!question?.trim()) throw new HttpsError('invalid-argument', 'Question is required.');
+    if (!ownerUid)          throw new HttpsError('invalid-argument', 'ownerUid is required.');
+
+    const viewerUid = request.auth.uid;
+    const isOwner   = viewerUid === ownerUid;
+
+    // ── Access check ─────────────────────────────────────────────────────────
+    if (!isOwner) {
+      const viewerEmail = request.auth.token.email || '';
+      const shareSnap = await db.collection('profile_shares')
+        .where('ownerUid', '==', ownerUid)
+        .where('sharedWithEmail', '==', viewerEmail.toLowerCase())
+        .limit(1)
+        .get();
+      if (shareSnap.empty) throw new HttpsError('permission-denied', 'Access denied.');
+    }
+
+    // ── Load avatar config ────────────────────────────────────────────────────
+    const configSnap = await db.collection('avatar_configs').doc(ownerUid).get();
+    const config     = configSnap.data();
+
+    if (!config?.voiceId || !config?.photoUrl) {
+      throw new HttpsError('failed-precondition',
+        'Avatar not configured. Please set up a reference photo and voice first.');
+    }
+
+    const voiceId  = config.voiceId  as string;
+    const photoUrl = config.photoUrl as string;
+
+    // ── Step 1: Get text answer via RAG (reuse queryAvatar logic) ─────────────
+    let answerText = '';
+    try {
+      // Embed question
+      const [questionEmbedding] = await getEmbeddings([question], OPENAI_API_KEY.value());
+
+      // Load vectors
+      const vectorSnap = await db.collection('vectors').where('uid', '==', ownerUid).get();
+
+      let context = '';
+      if (!vectorSnap.empty) {
+        const scored = vectorSnap.docs.map(doc => {
+          const d = doc.data() as VectorDoc;
+          return { ...d, score: cosineSimilarity(questionEmbedding, d.embedding) };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        const topChunks = scored.slice(0, 5).filter(c => c.score > 0.3);
+        context = topChunks.map((c, i) => `[${i+1} — ${c.fileName}]\n${c.chunkText}`).join('\n\n---\n\n');
+      }
+
+      // Load answers
+      const answersSnap = await db.collection('answers').where('uid', '==', ownerUid).get();
+      const answersContext = answersSnap.docs
+        .map(d => d.data())
+        .filter(d => d.answer?.trim())
+        .map(d => `Q${d.questionId}: ${d.answer}`)
+        .join('\n');
+
+      const systemPrompt = language === 'bg'
+        ? buildSystemPromptBG(ownerName, context, answersContext)
+        : buildSystemPromptEN(ownerName, context, answersContext);
+
+      // Call Claude for the answer
+      const Anthropic = require('@anthropic-ai/sdk').default;
+      const claude    = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+      const message   = await claude.messages.create({
+        model:      'claude-3-5-haiku-20241022',
+        max_tokens: 500,  // shorter for video — ~30-45 seconds of speech
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: question }],
+      });
+      answerText = (message.content[0] as { type: string; text: string }).text;
+    } catch (err) {
+      throw new HttpsError('internal', `RAG answer generation failed: ${String(err)}`);
+    }
+
+    // ── Step 2: Generate audio with ElevenLabs cloned voice ───────────────────
+    let audioBase64 = '';
+    try {
+      const ttsResp = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+        {
+          method:  'POST',
+          headers: {
+            'xi-api-key':   ELEVENLABS_API_KEY.value(),
+            'Content-Type': 'application/json',
+            'Accept':       'audio/mpeg',
+          },
+          body: JSON.stringify({
+            text:           answerText,
+            model_id:       'eleven_multilingual_v2',
+            voice_settings: { stability: 0.5, similarity_boost: 0.85, style: 0.2 },
+          }),
+        }
+      );
+
+      if (!ttsResp.ok) {
+        const errText = await ttsResp.text();
+        throw new Error(`ElevenLabs TTS error ${ttsResp.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const audioBuffer = Buffer.from(await ttsResp.arrayBuffer());
+      audioBase64 = audioBuffer.toString('base64');
+    } catch (err) {
+      throw new HttpsError('internal', `Voice synthesis failed: ${String(err)}`);
+    }
+
+    // ── Step 3: Upload audio to Firebase Storage (D-ID needs a URL) ──────────
+    let audioUrl = '';
+    try {
+      const bucket = gcs.bucket();
+      const audioPath = `avatar_audio/${ownerUid}/${Date.now()}.mp3`;
+      const audioFile = bucket.file(audioPath);
+      await audioFile.save(Buffer.from(audioBase64, 'base64'), {
+        contentType: 'audio/mpeg',
+        metadata: { cacheControl: 'public, max-age=300' },
+      });
+      await audioFile.makePublic();
+      audioUrl = `https://storage.googleapis.com/${bucket.name}/${audioPath}`;
+    } catch (err) {
+      throw new HttpsError('internal', `Audio upload failed: ${String(err)}`);
+    }
+
+    // ── Step 4: Create D-ID talking avatar video ──────────────────────────────
+    let videoUrl = '';
+    try {
+      const didAuth = Buffer.from(DID_API_KEY.value()).toString('base64');
+
+      // Create talk
+      const createResp = await fetch('https://api.d-id.com/talks', {
+        method:  'POST',
+        headers: {
+          'Authorization': `Basic ${didAuth}`,
+          'Content-Type':  'application/json',
+          'Accept':        'application/json',
+        },
+        body: JSON.stringify({
+          source_url: photoUrl,
+          script: {
+            type:      'audio',
+            audio_url: audioUrl,
+          },
+          config: {
+            fluent: true,
+            pad_audio: 0.5,
+            stitch: true,
+          },
+        }),
+      });
+
+      if (!createResp.ok) {
+        const errText = await createResp.text();
+        throw new Error(`D-ID create error ${createResp.status}: ${errText.slice(0, 300)}`);
+      }
+
+      const createData = await createResp.json() as { id: string; status: string };
+      const talkId = createData.id;
+
+      // Poll for completion (D-ID typically takes 10-30 seconds)
+      let attempts = 0;
+      const MAX_ATTEMPTS = 30;
+
+      while (attempts < MAX_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, 3000)); // wait 3s between polls
+        attempts++;
+
+        const pollResp = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+          headers: {
+            'Authorization': `Basic ${didAuth}`,
+            'Accept':        'application/json',
+          },
+        });
+
+        if (!pollResp.ok) continue;
+
+        const pollData = await pollResp.json() as {
+          status: string;
+          result_url?: string;
+          error?: { description: string };
+        };
+
+        functions.logger.info(`D-ID poll attempt ${attempts}: status=${pollData.status}`);
+
+        if (pollData.status === 'done' && pollData.result_url) {
+          videoUrl = pollData.result_url;
+          break;
+        }
+
+        if (pollData.status === 'error') {
+          throw new Error(`D-ID error: ${pollData.error?.description || 'unknown'}`);
+        }
+      }
+
+      if (!videoUrl) {
+        throw new Error('D-ID video generation timed out after 90 seconds.');
+      }
+
+    } catch (err) {
+      throw new HttpsError('internal', `Video generation failed: ${String(err)}`);
+    }
+
+    functions.logger.info(`✅ Avatar video generated for ${ownerUid}: ${videoUrl}`);
+
+    return {
+      videoUrl,
+      answerText,
+      talkId: videoUrl.split('/').slice(-2, -1)[0] || '',
+    };
+  }
+);
