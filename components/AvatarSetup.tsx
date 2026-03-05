@@ -185,17 +185,22 @@ export default function AvatarSetup({
       const uid = firebaseUser?.uid || ownerUid;
       const photo = memories.find(m => m.id === selectedPhotoId);
       const audio = memories.find(m => m.id === selectedAudioId);
-      const cfg: Partial<AvatarConfig> = {
-        uid,
-        photoMemoryId:   photo?.id,
-        photoUrl:        photo?.url,
-        photoName:       photo?.name,
-        audioMemoryId:   audio?.id,
-        audioUrl:        audio?.url,
-        audioName:       audio?.name,
-        audioStoragePath: audio?.storagePath,
-        setupComplete:   !!(photo && audio && avatarConfig?.voiceId),
-      };
+
+      // Build config — only include fields that have real values (no undefined)
+      const cfg: Partial<AvatarConfig> = { uid };
+      if (photo) {
+        cfg.photoMemoryId = photo.id;
+        cfg.photoUrl      = photo.url;
+        cfg.photoName     = photo.name;
+      }
+      if (audio) {
+        cfg.audioMemoryId    = audio.id;
+        cfg.audioUrl         = audio.url;
+        cfg.audioName        = audio.name;
+        cfg.audioStoragePath = audio.storagePath;
+      }
+      cfg.setupComplete = !!(photo && audio && avatarConfig?.voiceId);
+
       await saveAvatarConfig(uid, cfg);
       setAvatarConfig(prev => ({ ...(prev || { uid }), ...cfg } as AvatarConfig));
       setSaveMsg(t.saved);
@@ -225,16 +230,20 @@ export default function AvatarSetup({
       const uid = firebaseUser?.uid || ownerUid;
 
       // First, save the selected photo/audio so the config is up to date
+      // Only include fields with real values — no undefined allowed in Firestore
       const photo = memories.find(m => m.id === selectedPhotoId);
-      await saveAvatarConfig(uid, {
-        photoMemoryId: photo?.id,
-        photoUrl: photo?.url,
-        photoName: photo?.name,
-        audioMemoryId: audio.id,
-        audioUrl: audio.url,
-        audioName: audio.name,
+      const preConfig: Partial<AvatarConfig> = {
+        audioMemoryId:    audio.id,
+        audioUrl:         audio.url,
+        audioName:        audio.name,
         audioStoragePath: audio.storagePath,
-      });
+      };
+      if (photo) {
+        preConfig.photoMemoryId = photo.id;
+        preConfig.photoUrl      = photo.url;
+        preConfig.photoName     = photo.name;
+      }
+      await saveAvatarConfig(uid, preConfig);
 
       const functions = getFunctions(getApp(), 'europe-west1');
       const cloneFn = httpsCallable<
@@ -253,14 +262,14 @@ export default function AvatarSetup({
       await saveAvatarConfig(uid, {
         voiceId,
         voiceStatus: 'ready',
-        setupComplete: !!photo,
+        setupComplete: !!(photo && voiceId),
       });
 
       setAvatarConfig(prev => ({
         ...(prev || { uid }),
         voiceId,
         voiceStatus: 'ready',
-        setupComplete: !!photo,
+        setupComplete: !!(photo && voiceId),
       } as AvatarConfig));
 
       setCloneMsg(t.cloneSuccess);

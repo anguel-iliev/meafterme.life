@@ -4,8 +4,15 @@
 import {
   collection, addDoc, query, where, getDocs,
   doc, updateDoc, getDoc, setDoc, deleteDoc, orderBy, limit,
-  serverTimestamp
+  serverTimestamp, deleteField
 } from 'firebase/firestore';
+
+/** Remove undefined (and optionally null) fields so Firestore never sees 'undefined' */
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined)
+  ) as Partial<T>;
+}
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -440,7 +447,7 @@ export async function deleteAllMemoryItems(uid: string): Promise<void> {
 
 /**
  * Set or clear avatar_reference usage on a memory item.
- * Stores { usage: "avatar_reference" } or { usage: null } in Firestore.
+ * Stores { usage: "avatar_reference" } or deletes the field when clearing.
  */
 export async function setMemoryUsage(
   item: MemoryItem,
@@ -455,7 +462,10 @@ export async function setMemoryUsage(
     return;
   }
   const db = getClientDb();
-  await updateDoc(doc(db, 'memories', item.id), { usage });
+  // Firestore does not accept null — use deleteField() to remove the field
+  await updateDoc(doc(db, 'memories', item.id), {
+    usage: usage === null ? deleteField() : usage,
+  });
 }
 
 /**
@@ -851,14 +861,18 @@ export async function saveAvatarConfig(uid: string, config: Partial<AvatarConfig
   const key = `avatar_config_${uid}`;
   if (!isFirebaseClientConfigured()) {
     const existing = JSON.parse(localStorage.getItem(key) || '{}');
-    localStorage.setItem(key, JSON.stringify({ ...existing, ...config, uid, updatedAt: new Date().toISOString() }));
+    // Strip undefined for localStorage too
+    const cleaned = stripUndefined(config);
+    localStorage.setItem(key, JSON.stringify({ ...existing, ...cleaned, uid, updatedAt: new Date().toISOString() }));
     return;
   }
   const firebaseUser = await waitForAuthReady();
   const realUid = firebaseUser?.uid ?? uid;
   const db = getClientDb();
+  // CRITICAL: Firestore rejects 'undefined' values — strip them before writing
+  const cleaned = stripUndefined(config);
   await setDoc(doc(db, 'avatar_configs', realUid), {
-    ...config,
+    ...cleaned,
     uid: realUid,
     updatedAt: serverTimestamp(),
   }, { merge: true });
