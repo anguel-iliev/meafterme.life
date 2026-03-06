@@ -12,9 +12,8 @@ import React, { useState, useEffect } from 'react';
 import { useLang } from '@/components/LangContext';
 import type { AppUser, MemoryItem, AvatarConfig } from '@/lib/clientStore';
 import { getMemoryItems, getAvatarConfig, saveAvatarConfig, waitForAuthReady } from '@/lib/clientStore';
-import { isFirebaseClientConfigured } from '@/lib/firebaseClient';
+import { isFirebaseClientConfigured, getFirebaseApp } from '@/lib/firebaseClient';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getApp } from 'firebase/app';
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 const T = {
@@ -219,7 +218,14 @@ export default function AvatarSetup({ user, ownerUid }: { user: AppUser; ownerUi
     setCloning(true); setCloneMsg(''); setCloneErr('');
     try {
       const fu  = await waitForAuthReady();
-      const uid = fu?.uid || ownerUid;
+      if (!fu) {
+        setCloneErr(locale === 'bg'
+          ? '❌ Не сте влезли в профила. Моля влезте отново.'
+          : '❌ Not logged in. Please log in again.');
+        setCloning(false);
+        return;
+      }
+      const uid = fu.uid;
 
       // Save selection first
       const selectedPhotos = photos.filter(p => photoIds.has(p.id));
@@ -238,8 +244,8 @@ export default function AvatarSetup({ user, ownerUid }: { user: AppUser; ownerUi
       }
       await saveAvatarConfig(uid, preCfg);
 
-      // Call Cloud Function
-      const fns     = getFunctions(getApp(), 'us-central1');
+      // Call Cloud Function — use same app instance as auth to ensure token is attached
+      const fns     = getFunctions(getFirebaseApp(), 'us-central1');
       const cloneFn = httpsCallable<
         { audioStoragePath: string; voiceName: string },
         { voiceId: string }

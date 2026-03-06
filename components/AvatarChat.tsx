@@ -16,9 +16,8 @@ import { useLang } from '@/components/LangContext';
 import type { AppUser, MemoryItem, AvatarConfig } from '@/lib/clientStore';
 import { getAnswers, getMemoryItems, waitForAuthReady, getAvatarConfig } from '@/lib/clientStore';
 import { LIFE_QUESTIONS } from '@/lib/questions';
-import { isFirebaseClientConfigured, getClientAuth } from '@/lib/firebaseClient';
+import { isFirebaseClientConfigured, getClientAuth, getFirebaseApp } from '@/lib/firebaseClient';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getApp } from 'firebase/app';
 
 const _GEMINI_KEY = "AIzaSyCfvvEnh5V2ZrXWoqpSbGEAakCY5RKyxlg";
 function getGeminiKey(): string {
@@ -445,7 +444,7 @@ export default function AvatarChat({
         setGenerating(true);
 
         try {
-          const functions = getFunctions(getApp(), 'us-central1');
+          const functions = getFunctions(getFirebaseApp(), 'us-central1');
           const generateFn = httpsCallable<
             { question: string; ownerUid: string; ownerName: string; language: string },
             { videoUrl: string; answerText: string }
