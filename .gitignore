@@ -65,4 +65,4 @@ out/
 .env
 .env.local
 .dev.vars
-.github/
+# .github/ — НЕ игнорирай, нужен е за CI/CD workflows

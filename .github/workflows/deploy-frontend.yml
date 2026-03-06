@@ -1,0 +1,86 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# GitHub Actions — Build Next.js + Deploy to Superhosting
+#
+# Как работи:
+#   1. Ти правиш промяна в кода и пишеш: git push
+#   2. GitHub автоматично строи сайта и го качва в /meafterme/ на хостинга
+#   3. Нямаш нужда от CMD, PowerShell или ZIP файлове
+#
+# Необходими GitHub Secrets (Settings → Secrets → Actions):
+#   FTP_SERVER    — напр. afterme.life  или IP адреса на Superhosting
+#   FTP_USERNAME  — FTP потребителско име от cPanel
+#   FTP_PASSWORD  — FTP парола от cPanel
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: 🚀 Deploy Frontend to Superhosting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'dictionaries/**'
+      - 'public/**'
+      - 'next.config.js'
+      - 'tailwind.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-frontend.yml'
+
+  # Ръчен старт от GitHub UI → Actions → Run workflow
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build + Upload to /meafterme/
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Build Next.js (static export)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY:             ${{ secrets.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:         ${{ secrets.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID:          ${{ secrets.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:      ${{ secrets.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID:              ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
+          NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID:      ${{ secrets.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          NEXT_PUBLIC_GEMINI_API_KEY:               ${{ secrets.NEXT_PUBLIC_GEMINI_API_KEY }}
+          NEXT_PUBLIC_APP_URL:                      https://afterme.life
+
+      - name: 📤 Upload to Superhosting → /meafterme/
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server:      ${{ secrets.FTP_SERVER }}
+          username:    ${{ secrets.FTP_USERNAME }}
+          password:    ${{ secrets.FTP_PASSWORD }}
+          local-dir:   ./out/
+          server-dir:  /meafterme/
+          dangerous-clean-slate: true
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.DS_Store
+            **/Thumbs.db
+
+      - name: ✅ Done
+        run: |
+          echo "✅ Deployed to https://afterme.life"
+          echo "📦 Size: $(du -sh out/ | cut -f1)"
