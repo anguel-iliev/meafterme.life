@@ -571,7 +571,7 @@ export const cloneVoice = onCall(
       const formData = new FormData();
       formData.append('name', voiceName || `MEafterMe_${uid.slice(0, 8)}`);
       formData.append('description', 'Voice clone for MEafterMe digital avatar');
-      const blob = new Blob([buffer], { type: mimeType });
+      const blob = new Blob([buffer as unknown as ArrayBuffer], { type: mimeType });
       formData.append('files', blob, fileName);
 
       const elResp = await fetch('https://api.elevenlabs.io/v1/voices/add', {
