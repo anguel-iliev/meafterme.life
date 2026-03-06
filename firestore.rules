@@ -35,12 +35,9 @@ service cloud.firestore {
       allow read, write, create: if request.auth != null;
     }
 
-    // Avatar configs — own document only
-    match /avatar_configs/{docId} {
-      allow read:   if request.auth != null && request.auth.uid == resource.data.uid;
-      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
-      allow update: if request.auth != null && request.auth.uid == resource.data.uid;
-      allow delete: if request.auth != null && request.auth.uid == resource.data.uid;
+    // Avatar configs — doc ID == user UID, so match directly
+    match /avatar_configs/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
     // Contact form

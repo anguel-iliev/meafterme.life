@@ -893,18 +893,19 @@ export async function getAvatarConfig(uid: string): Promise<AvatarConfig | null>
   if (!snap.exists()) return null;
   const d = snap.data();
   return {
-    uid: d.uid,
-    photoMemoryId: d.photoMemoryId,
-    photoUrl: d.photoUrl,
-    photoName: d.photoName,
-    audioMemoryId: d.audioMemoryId,
-    audioUrl: d.audioUrl,
-    audioName: d.audioName,
+    uid:              d.uid,
+    photoMemoryIds:   d.photoMemoryIds   || [],
+    photoMemoryId:    d.photoMemoryId,
+    photoUrl:         d.photoUrl,
+    photoName:        d.photoName,
+    audioMemoryId:    d.audioMemoryId,
+    audioUrl:         d.audioUrl,
+    audioName:        d.audioName,
     audioStoragePath: d.audioStoragePath,
-    voiceId: d.voiceId,
-    voiceStatus: d.voiceStatus,
-    setupComplete: d.setupComplete,
-    updatedAt: d.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+    voiceId:          d.voiceId,
+    voiceStatus:      d.voiceStatus,
+    setupComplete:    d.setupComplete,
+    updatedAt:        d.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
   };
 }
 
