@@ -1,13 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-
-    // Memories — only the owner can read/write their own files
     match /memories/{userId}/{allPaths=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-
-    // Allow Cloud Functions service account full access
-    // (handled automatically by Firebase Admin SDK — no explicit rule needed)
   }
 }
