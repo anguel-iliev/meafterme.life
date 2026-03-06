@@ -445,7 +445,7 @@ export default function AvatarChat({
         setGenerating(true);
 
         try {
-          const functions = getFunctions(getApp(), 'europe-west1');
+          const functions = getFunctions(getApp(), 'us-central1');
           const generateFn = httpsCallable<
             { question: string; ownerUid: string; ownerName: string; language: string },
             { videoUrl: string; answerText: string }

@@ -1,153 +1,150 @@
 'use client';
 /**
- * AvatarSetup — Настройка на AI аватар (v2 — интуитивен UX)
+ * AvatarSetup v3
  *
- * Поток:
- *  1. Избери ЕДНА главна снимка (кликни → избрана)
- *  2. Избери ЕДИН аудио/видео запис за гласа (кликни → избран)
- *  3. Натисни "Клонирай гласа" — 30–60 сек
- *  4. Готово — в "AI Аватар" виждаш видео отговори
- *
- * Активният аватар (снимка + глас) се пази в Firestore: avatar_configs/{uid}
+ * Логика:
+ *  - Снимки: кликни за да добавиш/махнеш от набора (до 5). Всички избрани се пращат на D-ID.
+ *  - Аудио:  само 1 файл за клониране. Кликни за да избереш, кликни пак за да смениш.
+ *  - Clone:  бутонът е активен когато има поне 1 снимка + 1 аудио.
+ *  - Save:   запазва избора без клониране (може да се използва после).
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLang } from '@/components/LangContext';
 import type { AppUser, MemoryItem, AvatarConfig } from '@/lib/clientStore';
-import {
-  getMemoryItems,
-  getAvatarConfig, saveAvatarConfig,
-  waitForAuthReady,
-} from '@/lib/clientStore';
+import { getMemoryItems, getAvatarConfig, saveAvatarConfig, waitForAuthReady } from '@/lib/clientStore';
 import { isFirebaseClientConfigured } from '@/lib/firebaseClient';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getApp } from 'firebase/app';
 
-// ─── i18n ──────────────────────────────────────────────────────────────────────
+// ─── i18n ─────────────────────────────────────────────────────────────────────
 const T = {
   bg: {
-    title:         '🎬 Настройка на AI Аватар',
-    subtitle:      'Три стъпки за да създадете вашия дигитален двойник.',
-    step1Title:    'Стъпка 1 — Изберете снимка',
-    step1Desc:     'Кликнете на снимка с ясно видимо лице. Тя ще бъде използвана за видео анимацията.',
-    step2Title:    'Стъпка 2 — Изберете аудио за гласа',
-    step2Desc:     'Кликнете на аудио/видео запис с ясен глас (поне 1 минута). ElevenLabs ще клонира гласа.',
-    step3Title:    'Стъпка 3 — Клонирайте гласа',
-    step3Desc:     'Натиснете бутона. Процесът отнема 30–60 секунди.',
-    noPhotos:      '📂 Нямате качени снимки. Отидете в "Мултимедия" и качете снимки на лицето си.',
-    noAudio:       '📂 Нямате качени аудио/видео файлове.',
-    selectHint:    'Кликнете за избор',
-    selected:      '✓ Избран',
-    activeAvatar:  '🤖 Активен аватар',
-    photo:         'Снимка',
-    voice:         'Глас',
-    notSet:        'не е зададен',
-    voiceReady:    'Готов ✓',
-    voiceNone:     'Не е клониран',
-    btnClone:      '🔊 Клонирай гласа',
-    btnCloning:    '⏳ Клонирането тече… (30–60 сек)',
-    btnVoiceReady: '✅ Гласът е клониран — Клонирай отново',
-    btnSave:       '💾 Запази избора',
-    btnSaving:     'Запазване…',
-    btnSaved:      '✓ Запазено!',
-    statusReady:   '✅ Аватарът е готов! Отидете в "AI Аватар" за да чатите.',
-    statusSetup:   '⚙️ Завършете настройката: изберете снимка + аудио + клонирайте гласа.',
-    statusPartial: '⚙️ Почти готово: ',
-    errNoAudio:    'Моля изберете аудио файл.',
-    errNoFirebase: 'Firebase не е конфигуриран.',
-    cloneOk:       '✅ Гласът е клониран успешно!',
-    cloneErr:      '❌ Грешка при клониране: ',
-    loading:       'Зареждане…',
-    size:          'Размер',
-    changePhoto:   'Сменете снимката',
-    changeAudio:   'Сменете аудиото',
+    title:        '🎬 Настройка на AI Аватар',
+    subtitle:     'Изберете снимки и аудио за вашия дигитален двойник.',
+    photosTitle:  '📸 Снимки за аватара',
+    photosDesc:   'Кликнете за да изберете / отмените снимка. Изберете 1 до 5 ясни снимки с лице.',
+    audioTitle:   '🎤 Аудио за клониране на гласа',
+    audioDesc:    'Изберете ЕДИН запис с ясен глас (поне 1 мин). Кликнете отново за смяна.',
+    cloneTitle:   '🚀 Стартирайте клонирането',
+    cloneDesc:    'След като сте избрали снимки и аудио, натиснете бутона.',
+    noPhotos:     'Нямате качени снимки. Отидете в „Мултимедия" и качете снимки.',
+    noAudio:      'Нямате качени аудио/видео файлове.',
+    selected:     'избрани',
+    of:           'от',
+    max:          '(макс. 5)',
+    clickSelect:  'кликни за избор',
+    clickDeselect:'кликни за отмяна',
+    audioHint:    'Кликнете за да изберете',
+    audioChange:  'Кликнете за да смените',
+    previewLabel: '▶ Преглед:',
+    btnSave:      '💾 Запази',
+    btnSaving:    'Запазване…',
+    btnSaved:     '✓ Запазено!',
+    btnClone:     '🔊 Клонирай гласа',
+    btnCloning:   '⏳ Клониране… (30–60 сек)',
+    btnReclone:   '🔄 Клонирай отново',
+    cloneOk:      '✅ Гласът е клониран успешно!',
+    cloneErr:     '❌ Грешка: ',
+    needPhoto:    'Изберете поне 1 снимка.',
+    needAudio:    'Изберете аудио файл.',
+    noFirebase:   'Firebase не е конфигуриран.',
+    statusReady:  '✅ Аватарът е готов! Отидете в „AI Аватар".',
+    statusSetup:  'Изберете снимки + аудио, после клонирайте гласа.',
+    loading:      'Зареждане…',
+    voiceReady:   '✅ Гласът е клониран',
+    voiceNone:    'Не е клониран',
+    photoCount:   'снимки избрани',
+    audioSel:     'избрано',
   },
   en: {
-    title:         '🎬 AI Avatar Setup',
-    subtitle:      'Three steps to create your digital twin.',
-    step1Title:    'Step 1 — Choose a photo',
-    step1Desc:     'Click a photo with a clearly visible face. It will be used for video animation.',
-    step2Title:    'Step 2 — Choose audio for voice',
-    step2Desc:     'Click an audio/video recording with a clear voice (at least 1 minute). ElevenLabs will clone it.',
-    step3Title:    'Step 3 — Clone the voice',
-    step3Desc:     'Press the button. The process takes 30–60 seconds.',
-    noPhotos:      '📂 No photos uploaded. Go to "Multimedia" and upload face photos.',
-    noAudio:       '📂 No audio/video files uploaded.',
-    selectHint:    'Click to select',
-    selected:      '✓ Selected',
-    activeAvatar:  '🤖 Active avatar',
-    photo:         'Photo',
-    voice:         'Voice',
-    notSet:        'not set',
-    voiceReady:    'Ready ✓',
-    voiceNone:     'Not cloned',
-    btnClone:      '🔊 Clone Voice',
-    btnCloning:    '⏳ Cloning… (30–60 sec)',
-    btnVoiceReady: '✅ Voice cloned — Clone again',
-    btnSave:       '💾 Save selection',
-    btnSaving:     'Saving…',
-    btnSaved:      '✓ Saved!',
-    statusReady:   '✅ Avatar is ready! Go to "AI Avatar" to start chatting.',
-    statusSetup:   '⚙️ Complete setup: choose photo + audio + clone voice.',
-    statusPartial: '⚙️ Almost done: ',
-    errNoAudio:    'Please select an audio file.',
-    errNoFirebase: 'Firebase not configured.',
-    cloneOk:       '✅ Voice cloned successfully!',
-    cloneErr:      '❌ Clone error: ',
-    loading:       'Loading…',
-    size:          'Size',
-    changePhoto:   'Change photo',
-    changeAudio:   'Change audio',
+    title:        '🎬 AI Avatar Setup',
+    subtitle:     'Choose photos and audio for your digital twin.',
+    photosTitle:  '📸 Avatar Photos',
+    photosDesc:   'Click to select / deselect. Choose 1–5 clear face photos.',
+    audioTitle:   '🎤 Voice Cloning Audio',
+    audioDesc:    'Select ONE recording with a clear voice (min 1 min). Click again to change.',
+    cloneTitle:   '🚀 Start Cloning',
+    cloneDesc:    'After selecting photos and audio, press the button.',
+    noPhotos:     'No photos uploaded. Go to "Multimedia" to upload face photos.',
+    noAudio:      'No audio/video files uploaded.',
+    selected:     'selected',
+    of:           'of',
+    max:          '(max 5)',
+    clickSelect:  'click to select',
+    clickDeselect:'click to deselect',
+    audioHint:    'Click to select',
+    audioChange:  'Click to change',
+    previewLabel: '▶ Preview:',
+    btnSave:      '💾 Save',
+    btnSaving:    'Saving…',
+    btnSaved:     '✓ Saved!',
+    btnClone:     '🔊 Clone Voice',
+    btnCloning:   '⏳ Cloning… (30–60 sec)',
+    btnReclone:   '🔄 Clone again',
+    cloneOk:      '✅ Voice cloned successfully!',
+    cloneErr:     '❌ Error: ',
+    needPhoto:    'Select at least 1 photo.',
+    needAudio:    'Select an audio file.',
+    noFirebase:   'Firebase is not configured.',
+    statusReady:  '✅ Avatar is ready! Go to "AI Avatar".',
+    statusSetup:  'Select photos + audio, then clone the voice.',
+    loading:      'Loading…',
+    voiceReady:   '✅ Voice cloned',
+    voiceNone:    'Not cloned yet',
+    photoCount:   'photos selected',
+    audioSel:     'selected',
   },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmtSize = (b?: number) => !b ? '' : b < 1024*1024
-  ? `${(b/1024).toFixed(0)} KB`
-  : `${(b/1024/1024).toFixed(1)} MB`;
+const fmtSize = (b?: number) =>
+  !b ? '' : b < 1_048_576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1_048_576).toFixed(1)} MB`;
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function AvatarSetup({
-  user,
-  ownerUid,
-}: {
-  user:     AppUser;
-  ownerUid: string;
-}) {
+export default function AvatarSetup({ user, ownerUid }: { user: AppUser; ownerUid: string }) {
   const { locale } = useLang();
-  const t = T[locale as 'bg' | 'en'] || T.bg;
+  const t = T[locale as 'bg' | 'en'] ?? T.bg;
 
-  const [memories,       setMemories]      = useState<MemoryItem[]>([]);
-  const [avatarConfig,   setAvatarConfig]  = useState<AvatarConfig | null>(null);
-  const [loading,        setLoading]       = useState(true);
-  const [selectedPhoto,  setSelectedPhoto] = useState<MemoryItem | null>(null);
-  const [selectedAudio,  setSelectedAudio] = useState<MemoryItem | null>(null);
-  const [cloning,        setCloning]       = useState(false);
-  const [cloneMsg,       setCloneMsg]      = useState('');
-  const [cloneErr,       setCloneErr]      = useState('');
-  const [saving,         setSaving]        = useState(false);
-  const [saveMsg,        setSaveMsg]       = useState('');
+  // State
+  const [memories,      setMemories]     = useState<MemoryItem[]>([]);
+  const [config,        setConfig]       = useState<AvatarConfig | null>(null);
+  const [loading,       setLoading]      = useState(true);
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // Multi-photo selection (up to 5)
+  const [photoIds,      setPhotoIds]     = useState<Set<string>>(new Set());
+  // Single audio selection
+  const [audioItem,     setAudioItem]    = useState<MemoryItem | null>(null);
+
+  // Actions
+  const [saving,        setSaving]       = useState(false);
+  const [saveMsg,       setSaveMsg]      = useState('');
+  const [cloning,       setCloning]      = useState(false);
+  const [cloneMsg,      setCloneMsg]     = useState('');
+  const [cloneErr,      setCloneErr]     = useState('');
+
+  // ── Load saved config ──────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const firebaseUser = await waitForAuthReady();
-        const uid = firebaseUser?.uid || ownerUid;
+        const fu = await waitForAuthReady();
+        const uid = fu?.uid || ownerUid;
         const [mems, cfg] = await Promise.all([
           getMemoryItems(uid).catch(() => [] as MemoryItem[]),
           getAvatarConfig(uid).catch(() => null),
         ]);
         setMemories(mems);
-        setAvatarConfig(cfg);
-        // Pre-select from saved config
-        if (cfg?.photoMemoryId) {
-          const p = mems.find(m => m.id === cfg.photoMemoryId);
-          if (p) setSelectedPhoto(p);
+        setConfig(cfg);
+
+        // Restore saved photo IDs
+        if (cfg?.photoMemoryIds?.length) {
+          setPhotoIds(new Set(cfg.photoMemoryIds));
+        } else if (cfg?.photoMemoryId) {
+          setPhotoIds(new Set([cfg.photoMemoryId]));
         }
+        // Restore saved audio
         if (cfg?.audioMemoryId) {
           const a = mems.find(m => m.id === cfg.audioMemoryId);
-          if (a) setSelectedAudio(a);
+          if (a) setAudioItem(a);
         }
       } finally {
         setLoading(false);
@@ -157,92 +154,117 @@ export default function AvatarSetup({
 
   const photos = memories.filter(m => m.type === 'photo');
   const audios = memories.filter(m => m.type === 'audio' || m.type === 'video');
+  const voiceReady = config?.voiceStatus === 'ready';
+  const isReady    = voiceReady && photoIds.size > 0;
 
-  const voiceReady = avatarConfig?.voiceStatus === 'ready';
-  const isFullyReady = voiceReady && !!selectedPhoto;
+  // ── Toggle photo ──────────────────────────────────────────────────────────
+  const togglePhoto = (id: string) => {
+    setPhotoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else if (next.size < 5) {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
-  // ── Save selection ────────────────────────────────────────────────────────
+  // ── Select audio (click to select, click again to deselect) ───────────────
+  const toggleAudio = (item: MemoryItem) => {
+    setAudioItem(prev => prev?.id === item.id ? null : item);
+  };
+
+  // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     setSaving(true); setSaveMsg('');
     try {
-      const firebaseUser = await waitForAuthReady();
-      const uid = firebaseUser?.uid || ownerUid;
-      const cfg: Partial<AvatarConfig> = { uid };
-      if (selectedPhoto) {
-        cfg.photoMemoryId = selectedPhoto.id;
-        cfg.photoUrl      = selectedPhoto.url;
-        cfg.photoName     = selectedPhoto.name;
+      const fu  = await waitForAuthReady();
+      const uid = fu?.uid || ownerUid;
+      const selectedPhotos = photos.filter(p => photoIds.has(p.id));
+      const mainPhoto      = selectedPhotos[0] ?? null;
+
+      const cfg: Partial<AvatarConfig> & { photoMemoryIds?: string[] } = { uid };
+      cfg.photoMemoryIds = [...photoIds];
+      if (mainPhoto) {
+        cfg.photoMemoryId = mainPhoto.id;
+        cfg.photoUrl      = mainPhoto.url;
+        cfg.photoName     = mainPhoto.name;
       }
-      if (selectedAudio) {
-        cfg.audioMemoryId    = selectedAudio.id;
-        cfg.audioUrl         = selectedAudio.url;
-        cfg.audioName        = selectedAudio.name;
-        cfg.audioStoragePath = selectedAudio.storagePath;
+      if (audioItem) {
+        cfg.audioMemoryId    = audioItem.id;
+        cfg.audioUrl         = audioItem.url;
+        cfg.audioName        = audioItem.name;
+        cfg.audioStoragePath = audioItem.storagePath;
       }
-      cfg.setupComplete = isFullyReady;
+      cfg.setupComplete = isReady;
+
       await saveAvatarConfig(uid, cfg);
-      setAvatarConfig(prev => ({ ...(prev || { uid }), ...cfg } as AvatarConfig));
+      setConfig(prev => ({ ...(prev ?? { uid }), ...cfg } as AvatarConfig));
       setSaveMsg(t.btnSaved);
       setTimeout(() => setSaveMsg(''), 3000);
     } catch (e: any) {
-      setSaveMsg('❌ ' + (e?.message || 'Error'));
+      setSaveMsg('❌ ' + (e?.message ?? 'Error'));
     } finally {
       setSaving(false);
     }
   };
 
   // ── Clone voice ───────────────────────────────────────────────────────────
-  const handleCloneVoice = async () => {
-    if (!selectedAudio) { setCloneErr(t.errNoAudio); return; }
-    if (!isFirebaseClientConfigured()) { setCloneErr(t.errNoFirebase); return; }
+  const handleClone = async () => {
+    if (photoIds.size === 0) { setCloneErr(t.needPhoto); return; }
+    if (!audioItem)          { setCloneErr(t.needAudio); return; }
+    if (!isFirebaseClientConfigured()) { setCloneErr(t.noFirebase); return; }
 
     setCloning(true); setCloneMsg(''); setCloneErr('');
     try {
-      const firebaseUser = await waitForAuthReady();
-      const uid = firebaseUser?.uid || ownerUid;
+      const fu  = await waitForAuthReady();
+      const uid = fu?.uid || ownerUid;
 
-      // Save current selection first
-      const preCfg: Partial<AvatarConfig> = {
-        audioMemoryId:    selectedAudio.id,
-        audioUrl:         selectedAudio.url,
-        audioName:        selectedAudio.name,
-        audioStoragePath: selectedAudio.storagePath,
+      // Save selection first
+      const selectedPhotos = photos.filter(p => photoIds.has(p.id));
+      const mainPhoto      = selectedPhotos[0];
+      const preCfg: Partial<AvatarConfig> & { photoMemoryIds?: string[] } = {
+        photoMemoryIds:   [...photoIds],
+        audioMemoryId:    audioItem.id,
+        audioUrl:         audioItem.url,
+        audioName:        audioItem.name,
+        audioStoragePath: audioItem.storagePath,
       };
-      if (selectedPhoto) {
-        preCfg.photoMemoryId = selectedPhoto.id;
-        preCfg.photoUrl      = selectedPhoto.url;
-        preCfg.photoName     = selectedPhoto.name;
+      if (mainPhoto) {
+        preCfg.photoMemoryId = mainPhoto.id;
+        preCfg.photoUrl      = mainPhoto.url;
+        preCfg.photoName     = mainPhoto.name;
       }
       await saveAvatarConfig(uid, preCfg);
 
-      // Call Cloud Function — deployed in us-central1
-      const fns = getFunctions(getApp(), 'us-central1');
+      // Call Cloud Function
+      const fns     = getFunctions(getApp(), 'us-central1');
       const cloneFn = httpsCallable<
         { audioStoragePath: string; voiceName: string },
-        { voiceId: string; status: string }
+        { voiceId: string }
       >(fns, 'cloneVoice');
 
-      const result = await cloneFn({
-        audioStoragePath: selectedAudio.storagePath,
-        voiceName: `avatar_${uid.slice(0, 8)}`,
+      const res     = await cloneFn({
+        audioStoragePath: audioItem.storagePath,
+        voiceName:        `avatar_${uid.slice(0, 8)}`,
       });
 
-      const voiceId = result.data.voiceId;
       await saveAvatarConfig(uid, {
-        voiceId,
+        voiceId:       res.data.voiceId,
         voiceStatus:   'ready',
-        setupComplete: !!selectedPhoto,
+        setupComplete: true,
       });
-      setAvatarConfig(prev => ({
-        ...(prev || { uid }),
-        voiceId,
+      setConfig(prev => ({
+        ...(prev ?? { uid }),
+        voiceId:       res.data.voiceId,
         voiceStatus:   'ready',
-        setupComplete: !!selectedPhoto,
+        setupComplete: true,
       } as AvatarConfig));
       setCloneMsg(t.cloneOk);
-      setTimeout(() => setCloneMsg(''), 5000);
+      setTimeout(() => setCloneMsg(''), 6000);
     } catch (e: any) {
-      const msg = e?.message || e?.details || String(e);
+      const msg = e?.message ?? e?.details ?? String(e);
       setCloneErr(t.cloneErr + msg.slice(0, 300));
     } finally {
       setCloning(false);
@@ -250,139 +272,118 @@ export default function AvatarSetup({
   };
 
   // ── Styles ────────────────────────────────────────────────────────────────
-  const amber  = 'hsl(36 80% 55%)';
-  const cream  = 'hsl(38 50% 92%)';
-  const dimmed = 'hsl(38 50% 92% / 0.55)';
-  const dark   = 'hsl(30 15% 7%)';
-  const card   = {
+  const A  = 'hsl(36 80% 55%)';   // amber
+  const CR = 'hsl(38 50% 92%)';   // cream
+  const DM = 'hsl(38 40% 92% / 0.5)';
+  const DK = 'hsl(30 15% 7%)';
+  const card: React.CSSProperties = {
     background:   'hsl(30 12% 11%)',
     border:       '1px solid hsl(30 10% 18%)',
     borderRadius: '1rem',
     padding:      '1.25rem',
-  } as React.CSSProperties;
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5 max-w-2xl">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div>
-        <h2 className="font-display text-xl font-bold" style={{ color: cream }}>{t.title}</h2>
-        <p className="font-body text-sm mt-1" style={{ color: dimmed }}>{t.subtitle}</p>
+        <h2 className="font-display text-xl font-bold" style={{ color: CR }}>{t.title}</h2>
+        <p  className="font-body text-sm mt-1"         style={{ color: DM }}>{t.subtitle}</p>
       </div>
 
-      {/* ── Active Avatar Status Card ── */}
+      {/* ── Status bar ── */}
       <div style={{
         ...card,
-        background: isFullyReady ? 'hsl(142 35% 10%)' : 'hsl(36 25% 9%)',
-        border: `1px solid ${isFullyReady ? 'hsl(142 50% 25%)' : 'hsl(36 80% 55% / 0.25)'}`,
+        background: isReady ? 'hsl(142 35% 10%)' : 'hsl(36 20% 9%)',
+        border:     `1px solid ${isReady ? 'hsl(142 50% 25%)' : 'hsl(36 60% 45% / 0.3)'}`,
       }}>
-        <p className="font-display text-sm font-bold mb-3" style={{ color: isFullyReady ? 'hsl(142 70% 65%)' : amber }}>
-          {t.activeAvatar}
-        </p>
-
-        <div className="flex items-center gap-4 flex-wrap">
-          {/* Active photo preview */}
+        <div className="flex flex-wrap gap-4 items-center">
+          {/* Photo status */}
           <div className="flex items-center gap-2">
-            <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0"
-                 style={{ border: `2px solid ${selectedPhoto ? amber : 'hsl(30 10% 22%)'}` }}>
-              {selectedPhoto
-                ? <img src={selectedPhoto.url} alt="" className="w-full h-full object-cover" />
-                : <div className="w-full h-full flex items-center justify-center text-xl"
-                       style={{ background: 'hsl(30 10% 16%)' }}>📸</div>
-              }
-            </div>
-            <div>
-              <p className="text-xs font-body" style={{ color: dimmed }}>{t.photo}</p>
-              <p className="text-sm font-body font-medium" style={{ color: cream }}>
-                {selectedPhoto ? selectedPhoto.name.slice(0, 20) : <span style={{ color: dimmed }}>{t.notSet}</span>}
-              </p>
-            </div>
+            <span className="text-lg">{photoIds.size > 0 ? '✅' : '⬜'}</span>
+            <span className="font-body text-sm" style={{ color: photoIds.size > 0 ? A : DM }}>
+              {photoIds.size > 0
+                ? `${photoIds.size} ${t.photoCount}`
+                : t.needPhoto}
+            </span>
           </div>
-
-          <div style={{ width: '1px', height: '36px', background: 'hsl(30 10% 20%)' }} />
-
-          {/* Active voice */}
+          <span style={{ color: 'hsl(30 10% 25%)' }}>|</span>
+          {/* Audio status */}
           <div className="flex items-center gap-2">
-            <div className="w-12 h-12 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
-                 style={{ background: 'hsl(30 10% 16%)', border: `2px solid ${voiceReady ? 'hsl(142 50% 30%)' : 'hsl(30 10% 22%)'}` }}>
-              {voiceReady ? '✅' : '🎤'}
-            </div>
-            <div>
-              <p className="text-xs font-body" style={{ color: dimmed }}>{t.voice}</p>
-              <p className="text-sm font-body font-medium"
-                 style={{ color: voiceReady ? 'hsl(142 70% 65%)' : cream }}>
-                {selectedAudio
-                  ? (voiceReady ? t.voiceReady : selectedAudio.name.slice(0, 20))
-                  : <span style={{ color: dimmed }}>{t.notSet}</span>
-                }
-              </p>
-            </div>
+            <span className="text-lg">{audioItem ? '✅' : '⬜'}</span>
+            <span className="font-body text-sm" style={{ color: audioItem ? A : DM }}>
+              {audioItem ? audioItem.name.slice(0, 22) : t.needAudio}
+            </span>
+          </div>
+          <span style={{ color: 'hsl(30 10% 25%)' }}>|</span>
+          {/* Voice status */}
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{voiceReady ? '✅' : '⬜'}</span>
+            <span className="font-body text-sm" style={{ color: voiceReady ? 'hsl(142 70% 60%)' : DM }}>
+              {voiceReady ? t.voiceReady : t.voiceNone}
+            </span>
           </div>
         </div>
-
-        {/* Overall status */}
-        <p className="mt-3 text-xs font-body rounded-lg px-3 py-2"
-           style={{
-             background: isFullyReady ? 'hsl(142 40% 8%)' : 'hsl(36 30% 8%)',
-             color: isFullyReady ? 'hsl(142 70% 65%)' : amber,
-           }}>
-          {isFullyReady ? t.statusReady : t.statusSetup}
+        <p className="mt-2 text-xs font-body" style={{ color: isReady ? 'hsl(142 70% 60%)' : DM }}>
+          {isReady ? t.statusReady : t.statusSetup}
         </p>
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-6" style={{ color: amber }}>
+        <div className="flex items-center gap-2 py-6" style={{ color: A }}>
           <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
           <span className="font-body text-sm">{t.loading}</span>
         </div>
       ) : (<>
 
-        {/* ══ STEP 1: Photo ══════════════════════════════════════════════════ */}
+        {/* ══ SECTION 1: Photos ═════════════════════════════════════════════ */}
         <div style={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center"
-                  style={{ background: selectedPhoto ? amber : 'hsl(30 10% 22%)', color: selectedPhoto ? dark : dimmed }}>
-              {selectedPhoto ? '✓' : '1'}
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-display text-base font-bold" style={{ color: CR }}>{t.photosTitle}</h3>
+            <span className="font-body text-xs px-2 py-0.5 rounded-full"
+                  style={{ background: photoIds.size > 0 ? `${A}22` : 'hsl(30 10% 18%)', color: photoIds.size > 0 ? A : DM }}>
+              {photoIds.size} {t.of} 5 {t.selected}
             </span>
-            <h3 className="font-display text-base font-bold" style={{ color: cream }}>{t.step1Title}</h3>
           </div>
-          <p className="font-body text-xs mb-4 ml-8" style={{ color: dimmed }}>{t.step1Desc}</p>
+          <p className="font-body text-xs mb-4" style={{ color: DM }}>{t.photosDesc}</p>
 
           {photos.length === 0 ? (
-            <p className="font-body text-sm py-3 px-4 rounded-lg"
-               style={{ background: 'hsl(36 30% 8%)', color: amber }}>{t.noPhotos}</p>
+            <p className="font-body text-sm px-4 py-3 rounded-lg"
+               style={{ background: 'hsl(36 25% 8%)', color: A }}>{t.noPhotos}</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {photos.map(photo => {
-                const isSelected = selectedPhoto?.id === photo.id;
+              {photos.map(p => {
+                const sel      = photoIds.has(p.id);
+                const disabled = !sel && photoIds.size >= 5;
                 return (
-                  <div key={photo.id}
-                       onClick={() => setSelectedPhoto(isSelected ? null : photo)}
-                       className="relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02]"
+                  <div key={p.id}
+                       onClick={() => !disabled && togglePhoto(p.id)}
+                       className="relative rounded-xl overflow-hidden transition-all"
                        style={{
-                         border:     `2px solid ${isSelected ? amber : 'hsl(30 10% 20%)'}`,
-                         boxShadow:  isSelected ? `0 0 20px ${amber}44` : 'none',
-                         outline:    isSelected ? `2px solid ${amber}33` : 'none',
-                         outlineOffset: '2px',
+                         cursor:     disabled ? 'not-allowed' : 'pointer',
+                         opacity:    disabled ? 0.4 : 1,
+                         border:     `2px solid ${sel ? A : 'hsl(30 10% 20%)'}`,
+                         boxShadow:  sel ? `0 0 18px ${A}44` : 'none',
+                         transform:  sel ? 'scale(1.02)' : 'scale(1)',
                        }}>
                     {/* Image */}
-                    <div style={{ aspectRatio: '1/1', background: dark }}>
-                      <img src={photo.url} alt={photo.name} className="w-full h-full object-cover" />
+                    <div style={{ aspectRatio: '1/1' }}>
+                      <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
                     </div>
                     {/* Selected overlay */}
-                    {isSelected && (
+                    {sel && (
                       <div className="absolute inset-0 flex items-center justify-center"
-                           style={{ background: `${amber}20` }}>
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold"
-                             style={{ background: amber, color: dark }}>✓</div>
+                           style={{ background: `${A}18` }}>
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-lg"
+                             style={{ background: A, color: DK }}>✓</div>
                       </div>
                     )}
                     {/* Name bar */}
-                    <div className="px-2 py-1.5"
-                         style={{ background: isSelected ? `${amber}22` : 'hsl(30 12% 9%)' }}>
-                      <p className="font-body text-xs truncate" style={{ color: isSelected ? amber : dimmed }}>
-                        {isSelected ? `✓ ${photo.name.slice(0, 14)}` : photo.name.slice(0, 16)}
+                    <div className="px-2 py-1.5" style={{ background: sel ? `${A}22` : 'hsl(30 12% 9%)' }}>
+                      <p className="font-body text-xs truncate" style={{ color: sel ? A : DM }}>
+                        {p.name.slice(0, 18)}
                       </p>
                     </div>
                   </div>
@@ -390,66 +391,66 @@ export default function AvatarSetup({
               })}
             </div>
           )}
-          {selectedPhoto && (
-            <button onClick={() => setSelectedPhoto(null)}
-                    className="mt-3 text-xs font-body underline"
-                    style={{ color: dimmed }}>
-              {t.changePhoto}
-            </button>
+
+          {/* Selected list */}
+          {photoIds.size > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {photos.filter(p => photoIds.has(p.id)).map((p, i) => (
+                <span key={p.id}
+                      onClick={() => togglePhoto(p.id)}
+                      className="cursor-pointer inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-body"
+                      style={{ background: `${A}22`, color: A, border: `1px solid ${A}44` }}
+                      title={t.clickDeselect}>
+                  {i + 1}. {p.name.slice(0, 14)} ×
+                </span>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* ══ STEP 2: Audio ══════════════════════════════════════════════════ */}
+        {/* ══ SECTION 2: Audio ══════════════════════════════════════════════ */}
         <div style={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center"
-                  style={{ background: selectedAudio ? amber : 'hsl(30 10% 22%)', color: selectedAudio ? dark : dimmed }}>
-              {selectedAudio ? '✓' : '2'}
-            </span>
-            <h3 className="font-display text-base font-bold" style={{ color: cream }}>{t.step2Title}</h3>
-          </div>
-          <p className="font-body text-xs mb-4 ml-8" style={{ color: dimmed }}>{t.step2Desc}</p>
+          <h3 className="font-display text-base font-bold mb-1" style={{ color: CR }}>{t.audioTitle}</h3>
+          <p  className="font-body text-xs mb-4"                style={{ color: DM }}>{t.audioDesc}</p>
 
           {audios.length === 0 ? (
-            <p className="font-body text-sm py-3 px-4 rounded-lg"
-               style={{ background: 'hsl(36 30% 8%)', color: amber }}>{t.noAudio}</p>
+            <p className="font-body text-sm px-4 py-3 rounded-lg"
+               style={{ background: 'hsl(36 25% 8%)', color: A }}>{t.noAudio}</p>
           ) : (
             <div className="space-y-2">
-              {audios.map(audio => {
-                const isSelected = selectedAudio?.id === audio.id;
+              {audios.map(a => {
+                const sel = audioItem?.id === a.id;
                 return (
-                  <div key={audio.id}
-                       onClick={() => setSelectedAudio(isSelected ? null : audio)}
+                  <div key={a.id}
+                       onClick={() => toggleAudio(a)}
                        className="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all"
                        style={{
-                         background: isSelected ? `${amber}14` : 'hsl(30 10% 14%)',
-                         border:     `2px solid ${isSelected ? amber : 'hsl(30 10% 20%)'}`,
-                         boxShadow:  isSelected ? `0 0 14px ${amber}33` : 'none',
+                         background: sel ? `${A}14` : 'hsl(30 10% 14%)',
+                         border:     `2px solid ${sel ? A : 'hsl(30 10% 20%)'}`,
+                         boxShadow:  sel ? `0 0 14px ${A}33` : 'none',
                        }}>
                     {/* Icon */}
-                    <div className="w-11 h-11 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
-                         style={{ background: isSelected ? `${amber}33` : 'hsl(30 10% 20%)' }}>
-                      {audio.type === 'video' ? '🎬' : '🎵'}
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
+                         style={{ background: sel ? `${A}33` : 'hsl(30 10% 20%)' }}>
+                      {a.type === 'video' ? '🎬' : '🎵'}
                     </div>
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-body text-sm font-semibold truncate" style={{ color: isSelected ? amber : cream }}>
-                        {audio.name}
+                      <p className="font-body text-sm font-semibold truncate"
+                         style={{ color: sel ? A : CR }}>
+                        {a.name}
                       </p>
-                      <p className="font-body text-xs" style={{ color: dimmed }}>
-                        {audio.type === 'video' ? 'video' : 'audio'}
-                        {audio.size ? ` · ${fmtSize(audio.size)}` : ''}
+                      <p className="font-body text-xs" style={{ color: DM }}>
+                        {a.type} {a.size ? `· ${fmtSize(a.size)}` : ''}
+                        {sel ? ` · ${t.audioChange}` : ` · ${t.audioHint}`}
                       </p>
                     </div>
-                    {/* Selected badge */}
-                    <div className="flex-shrink-0">
-                      {isSelected ? (
-                        <span className="text-sm px-3 py-1 rounded-full font-body font-bold"
-                              style={{ background: amber, color: dark }}>✓</span>
-                      ) : (
-                        <span className="text-xs px-3 py-1 rounded-full font-body"
-                              style={{ background: 'hsl(30 10% 20%)', color: dimmed }}>{t.selectHint}</span>
-                      )}
+                    {/* Badge */}
+                    <div className="flex-shrink-0 text-sm font-bold px-3 py-1 rounded-full"
+                         style={sel
+                           ? { background: A, color: DK }
+                           : { background: 'hsl(30 10% 20%)', color: DM }}>
+                      {sel ? '✓' : '+'}
                     </div>
                   </div>
                 );
@@ -458,64 +459,59 @@ export default function AvatarSetup({
           )}
 
           {/* Audio preview */}
-          {selectedAudio && (
-            <div className="mt-3 space-y-2">
-              <audio controls src={selectedAudio.url} className="w-full rounded-lg" />
-              <button onClick={() => setSelectedAudio(null)}
-                      className="text-xs font-body underline"
-                      style={{ color: dimmed }}>
-                {t.changeAudio}
-              </button>
+          {audioItem && (
+            <div className="mt-3 p-3 rounded-xl" style={{ background: 'hsl(30 10% 9%)', border: `1px solid ${A}33` }}>
+              <p className="font-body text-xs mb-2" style={{ color: A }}>{t.previewLabel} {audioItem.name}</p>
+              <audio controls src={audioItem.url} className="w-full" />
             </div>
           )}
         </div>
 
-        {/* ══ STEP 3: Actions ════════════════════════════════════════════════ */}
+        {/* ══ SECTION 3: Actions ════════════════════════════════════════════ */}
         <div style={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center"
-                  style={{ background: voiceReady ? amber : 'hsl(30 10% 22%)', color: voiceReady ? dark : dimmed }}>
-              {voiceReady ? '✓' : '3'}
-            </span>
-            <h3 className="font-display text-base font-bold" style={{ color: cream }}>{t.step3Title}</h3>
-          </div>
-          <p className="font-body text-xs mb-4 ml-8" style={{ color: dimmed }}>{t.step3Desc}</p>
+          <h3 className="font-display text-base font-bold mb-1" style={{ color: CR }}>{t.cloneTitle}</h3>
+          <p  className="font-body text-xs mb-4"                style={{ color: DM }}>{t.cloneDesc}</p>
 
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-wrap gap-3 items-center">
+
             {/* Save button */}
             <button
               onClick={handleSave}
-              disabled={saving || (!selectedPhoto && !selectedAudio)}
+              disabled={saving || (photoIds.size === 0 && !audioItem)}
               className="font-body font-semibold text-sm px-5 py-2.5 rounded-xl transition-all disabled:opacity-40"
-              style={{ background: 'hsl(30 10% 20%)', color: cream, border: '1px solid hsl(30 10% 28%)' }}>
+              style={{ background: 'hsl(30 10% 20%)', color: CR, border: '1px solid hsl(30 10% 30%)' }}>
               {saving ? t.btnSaving : saveMsg || t.btnSave}
             </button>
 
-            {/* Clone voice button */}
+            {/* Clone button */}
             <button
-              onClick={handleCloneVoice}
-              disabled={cloning || !selectedAudio}
+              onClick={handleClone}
+              disabled={cloning || photoIds.size === 0 || !audioItem}
               className="font-body font-semibold text-sm px-6 py-2.5 rounded-xl transition-all disabled:opacity-40 flex items-center gap-2"
               style={{
-                background: cloning ? 'hsl(36 30% 15%)' : voiceReady ? 'hsl(142 40% 14%)' : amber,
-                color:      cloning ? amber : voiceReady ? 'hsl(142 80% 70%)' : dark,
-                border:     voiceReady ? '1px solid hsl(142 50% 28%)' : 'none',
+                background: cloning
+                  ? 'hsl(36 25% 14%)'
+                  : voiceReady
+                    ? 'hsl(142 40% 13%)'
+                    : photoIds.size > 0 && audioItem ? A : 'hsl(30 10% 20%)',
+                color: cloning ? A : voiceReady ? 'hsl(142 80% 68%)' : DK,
+                border: voiceReady ? '1px solid hsl(142 50% 28%)' : 'none',
               }}>
               {cloning && <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />}
-              {cloning ? t.btnCloning : voiceReady ? t.btnVoiceReady : t.btnClone}
+              {cloning ? t.btnCloning : voiceReady ? t.btnReclone : t.btnClone}
             </button>
           </div>
 
-          {/* Messages */}
-          {cloneMsg && !cloneErr && (
-            <div className="mt-3 text-sm font-body px-4 py-2.5 rounded-xl"
-                 style={{ background: 'hsl(142 40% 9%)', color: 'hsl(142 80% 70%)', border: '1px solid hsl(142 50% 22%)' }}>
+          {/* Feedback messages */}
+          {cloneMsg && (
+            <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-body"
+                 style={{ background: 'hsl(142 40% 9%)', color: 'hsl(142 80% 68%)', border: '1px solid hsl(142 50% 22%)' }}>
               {cloneMsg}
             </div>
           )}
           {cloneErr && (
-            <div className="mt-3 text-sm font-body px-4 py-2.5 rounded-xl"
-                 style={{ background: 'hsl(0 40% 9%)', color: 'hsl(0 80% 70%)', border: '1px solid hsl(0 50% 22%)' }}>
+            <div className="mt-3 px-4 py-2.5 rounded-xl text-sm font-body"
+                 style={{ background: 'hsl(0 40% 9%)', color: 'hsl(0 80% 68%)', border: '1px solid hsl(0 50% 22%)' }}>
               {cloneErr}
             </div>
           )}

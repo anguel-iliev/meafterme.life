@@ -839,8 +839,9 @@ export async function getInviteCodes(): Promise<{ code: string; used: boolean; u
 
 export interface AvatarConfig {
   uid: string;
-  // Reference photo for D-ID (face image)
-  photoMemoryId?: string;
+  // Reference photos for D-ID (1-5 face images)
+  photoMemoryIds?: string[];   // array of up to 5 photo IDs
+  photoMemoryId?: string;      // primary photo (first of the array)
   photoUrl?: string;
   photoName?: string;
   // Reference audio for ElevenLabs voice clone
