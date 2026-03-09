@@ -1,14 +1,9 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # GitHub Actions — Deploy Firebase Functions + Rules
 #
-# Как работи:
-#   1. Ти промениш нещо в functions/ или *.rules и пишеш: git push
-#   2. GitHub автоматично деплойва Functions, Firestore rules, Storage rules
-#   3. Никога повече CMD или PowerShell за деплой
-#
-# Необходими GitHub Secrets (Settings → Secrets → Actions):
-#   FIREBASE_TOKEN  — генерира се ВЕДНЪЖ с: firebase login:ci
-#                     Пусни тази команда локално и постави токена в GitHub Secrets
+# Необходими GitHub Secrets:
+#   FIREBASE_TOKEN, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+#   ELEVENLABS_API_KEY, DID_API_KEY
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: 🔥 Deploy Firebase Functions & Rules
@@ -23,8 +18,6 @@ on:
       - 'storage.rules'
       - 'firebase.json'
       - '.github/workflows/deploy-functions.yml'
-
-  # Ръчен старт от GitHub UI → Actions → Run workflow
   workflow_dispatch:
 
 jobs:
@@ -54,6 +47,43 @@ jobs:
 
       - name: 🔥 Install Firebase CLI
         run: npm install -g firebase-tools
+
+      - name: 🔑 Set Firebase Secrets from GitHub Secrets
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo -n "$OPENAI_API_KEY" | firebase functions:secrets:set OPENAI_API_KEY \
+              --project meafterme-d0347 --token "$FIREBASE_TOKEN" --force
+            echo "✅ OPENAI_API_KEY set"
+          else
+            echo "⚠️ OPENAI_API_KEY not in GitHub Secrets — skipping"
+          fi
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo -n "$ANTHROPIC_API_KEY" | firebase functions:secrets:set ANTHROPIC_API_KEY \
+              --project meafterme-d0347 --token "$FIREBASE_TOKEN" --force
+            echo "✅ ANTHROPIC_API_KEY set"
+          else
+            echo "⚠️ ANTHROPIC_API_KEY not in GitHub Secrets — skipping"
+          fi
+          if [ -n "$ELEVENLABS_API_KEY" ]; then
+            echo -n "$ELEVENLABS_API_KEY" | firebase functions:secrets:set ELEVENLABS_API_KEY \
+              --project meafterme-d0347 --token "$FIREBASE_TOKEN" --force
+            echo "✅ ELEVENLABS_API_KEY set"
+          else
+            echo "⚠️ ELEVENLABS_API_KEY not in GitHub Secrets — skipping"
+          fi
+          if [ -n "$DID_API_KEY" ]; then
+            echo -n "$DID_API_KEY" | firebase functions:secrets:set DID_API_KEY \
+              --project meafterme-d0347 --token "$FIREBASE_TOKEN" --force
+            echo "✅ DID_API_KEY set"
+          else
+            echo "⚠️ DID_API_KEY not in GitHub Secrets — skipping"
+          fi
+        env:
+          FIREBASE_TOKEN:     ${{ secrets.FIREBASE_TOKEN }}
+          OPENAI_API_KEY:     ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          DID_API_KEY:        ${{ secrets.DID_API_KEY }}
 
       - name: 🚀 Deploy Functions + Firestore + Storage Rules
         run: |
