@@ -402,19 +402,31 @@ export async function getMemoryItems(uid: string): Promise<MemoryItem[]> {
     where('uid', '==', realUid)
   );
   const snap = await getDocs(q);
-  const items = snap.docs.map(d => ({
-    id: d.id,
-    uid: d.data().uid,
-    name: d.data().name,
-    description: d.data().description || '',
-    type: d.data().type,
-    url: d.data().url,
-    storagePath: d.data().storagePath,
-    size: d.data().size || 0,
-    mimeType: d.data().mimeType || '',
-    createdAt: d.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-    usage: d.data().usage || null,
-  }));
+  const items = snap.docs.map(d => {
+    const data = d.data();
+    // If storagePath is missing (old records), derive it from the download URL
+    let storagePath = data.storagePath || '';
+    if (!storagePath && data.url) {
+      try {
+        // Firebase Storage URLs contain the path after "/o/" encoded
+        const match = decodeURIComponent(data.url).match(/\/o\/(.+?)\?/);
+        if (match) storagePath = match[1];
+      } catch {}
+    }
+    return {
+      id: d.id,
+      uid: data.uid,
+      name: data.name,
+      description: data.description || '',
+      type: data.type,
+      url: data.url,
+      storagePath,
+      size: data.size || 0,
+      mimeType: data.mimeType || '',
+      createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+      usage: data.usage || null,
+    };
+  });
   // Sort client-side (newest first) to avoid requiring a composite Firestore index
   return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
