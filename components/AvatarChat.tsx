@@ -1,6 +1,6 @@
 'use client';
 /**
- * AvatarChat v2 — AI Avatar with Video Response
+ * AvatarChat v3 — AI Avatar with Video Response + Gemini Fallback
  *
  * Pipeline (VIDEO MODE - avatar configured):
  *  1. User asks a question
@@ -8,9 +8,14 @@
  *  3. Shows fullscreen video player with the talking avatar
  *  4. Question input at the bottom
  *
- * Pipeline (TEXT MODE - avatar not configured):
+ * Pipeline (TEXT MODE via Cloud Functions):
  *  1. Calls queryAvatar Cloud Function (RAG → Claude/Anthropic)
- *  2. Shows text response (NO Gemini - all AI via Firebase Functions)
+ *  2. Shows text response
+ *
+ * Pipeline (TEXT MODE via Gemini fallback - when Functions not deployed):
+ *  1. Loads answers from Firestore client-side
+ *  2. Calls Gemini API directly with answers as context
+ *  3. Shows text response
  *
  * Layout:
  *  - Top: header with mode badge + context info
@@ -20,9 +25,71 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLang } from '@/components/LangContext';
 import type { AppUser, AvatarConfig } from '@/lib/clientStore';
-import { waitForAuthReady, getAvatarConfig } from '@/lib/clientStore';
+import { waitForAuthReady, getAvatarConfig, getAnswers } from '@/lib/clientStore';
 import { isFirebaseClientConfigured, getFirebaseApp } from '@/lib/firebaseClient';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+
+// ─── Gemini direct fallback (used when Cloud Functions are not deployed) ────────
+const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+const GEMINI_MODEL   = 'gemini-2.0-flash';
+
+async function callGeminiFallback(
+  question:       string,
+  ownerName:      string,
+  answersContext: string,
+  language:       string,
+): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    return language === 'bg'
+      ? 'AI аватарът все още не е конфигуриран. Моля, свържете се с администратора.'
+      : 'The AI avatar is not configured yet. Please contact the administrator.';
+  }
+
+  const systemBg = `Ти си дигиталният аватар на ${ownerName}. Говориш от ПЪРВО лице — като самия него/нея.
+
+ПРАВИЛО 1: Отговаряй САМО въз основа на предоставените по-долу отговори на житейски въпроси.
+ПРАВИЛО 2: Ако нямаш информация — кажи го честно и топло, не измисляй.
+ПРАВИЛО 3: Пиши на БЪЛГАРСКИ език. Отговорите да са кратки (2-4 изречения) и топли.
+
+═══ ОТГОВОРИ НА ЖИТЕЙСКИ ВЪПРОСИ ═══
+${answersContext || 'Все още няма попълнени отговори.'}
+═══════════════════════════════════════`;
+
+  const systemEn = `You are the digital avatar of ${ownerName}. You speak in FIRST person — as themselves.
+
+RULE 1: Answer ONLY based on the life-question answers provided below.
+RULE 2: If you have no information — say so honestly and warmly, do not make things up.
+RULE 3: Write in ENGLISH. Keep responses short (2-4 sentences) and warm.
+
+═══ LIFE QUESTION ANSWERS ═══
+${answersContext || 'No answers filled in yet.'}
+════════════════════════════`;
+
+  const systemPrompt = language === 'bg' ? systemBg : systemEn;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: question }] }],
+        generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+      }),
+    }
+  );
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Gemini ${resp.status}: ${errText.slice(0, 150)}`);
+  }
+
+  const data = await resp.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned empty response.');
+  return text;
+}
 
 // ─── i18n ──────────────────────────────────────────────────────────────────────
 const i18n = {
@@ -30,6 +97,7 @@ const i18n = {
     title:        '🎬 AI Avatar',
     videoMode:    '🎬 Video mode',
     textMode:     '💬 Text mode',
+    fallbackMode: '💬 Basic mode',
     subtitle:     'Video answers with your voice and face.',
     subtitleText: 'Text answers based on your memories.',
     placeholder:  'Ask something… e.g. "Where were you born?"',
@@ -46,7 +114,7 @@ const i18n = {
     step1:        '1. Finding answer…',
     step2:        '2. Synthesizing voice…',
     step3:        '3. Animating avatar…',
-    emptyHint:    'Ask me anything — I will answer in your voice.',
+    emptyHint:    'Ask me anything — I will answer based on your life answers.',
     suggestedQ: [
       'Tell me about yourself.',
       'What was your childhood like?',
@@ -59,6 +127,7 @@ const i18n = {
     title:        '🎬 AI Аватар',
     videoMode:    '🎬 Видео режим',
     textMode:     '💬 Текстов режим',
+    fallbackMode: '💬 Базов режим',
     subtitle:     'Видео отговори с вашия глас и лице.',
     subtitleText: 'Текстови отговори въз основа на вашите спомени.',
     placeholder:  'Задайте въпрос… напр. "Къде си роден/а?"',
@@ -75,7 +144,7 @@ const i18n = {
     step1:        '1. Намирам отговора…',
     step2:        '2. Синтезирам гласа…',
     step3:        '3. Анимирам аватара…',
-    emptyHint:    'Задайте въпрос — ще отговоря с вашия глас.',
+    emptyHint:    'Задайте въпрос — ще отговоря въз основа на вашите житейски отговори.',
     suggestedQ: [
       'Разкажи ми за себе си.',
       'Какво беше детството ти?',
@@ -104,6 +173,27 @@ const C11 = 'hsl(30 12% 11%)';   // card bg
 const C14 = 'hsl(30 10% 14%)';   // header bg
 const C18 = 'hsl(30 10% 18%)';   // border
 
+// ─── Gemini fallback helper (loads answers from Firestore, then calls Gemini) ──
+async function callGeminiFallbackWithAnswers(
+  question:  string,
+  ownerUid:  string,
+  ownerName: string,
+  language:  string,
+): Promise<string> {
+  // Load life answers from Firestore (client-side)
+  let answersContext = '';
+  try {
+    const answers = await getAnswers(ownerUid);
+    answersContext = Object.values(answers)
+      .filter(a => a.answer?.trim())
+      .map(a => `Q${a.questionId}: ${a.answer}`)
+      .join('\n');
+  } catch (e) {
+    console.warn('[Gemini fallback] Could not load answers:', e);
+  }
+  return callGeminiFallback(question, ownerName, answersContext, language);
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function AvatarChat({
   user,
@@ -117,7 +207,7 @@ export default function AvatarChat({
   const { locale } = useLang();
   const t = i18n[locale as 'en' | 'bg'] || i18n.bg;
 
-  const CHAT_KEY = `avatar_chat_v2_${ownerUid}`;
+  const CHAT_KEY = `avatar_chat_v3_${ownerUid}`;
 
   const [messages,     setMessages]     = useState<Message[]>(() => {
     try { return JSON.parse(localStorage.getItem(CHAT_KEY) || '[]'); } catch { return []; }
@@ -127,6 +217,8 @@ export default function AvatarChat({
   const [generating,   setGenerating]   = useState(false);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  // useFallback: true when Cloud Functions are unavailable → use Gemini directly
+  const [useFallback,  setUseFallback]  = useState(false);
   // Track which video is currently playing (latest)
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
@@ -180,7 +272,7 @@ export default function AvatarChat({
     setMessages(prev => [...prev, { id: userMsgId, role: 'user', text: q }]);
 
     try {
-      if (isAvatarReady && isFirebaseClientConfigured()) {
+      if (isAvatarReady && isFirebaseClientConfigured() && !useFallback) {
         // ── VIDEO MODE ──────────────────────────────────────────────────────
         setGenerating(true);
         try {
@@ -202,7 +294,7 @@ export default function AvatarChat({
           }]);
 
         } catch (videoErr: any) {
-          // Fallback to text via queryAvatar
+          // Fallback to text via queryAvatar Cloud Function
           console.error('[AvatarChat] Video generation failed:', videoErr);
           try {
             const fns = getFunctions(getFirebaseApp(), 'us-central1');
@@ -217,33 +309,53 @@ export default function AvatarChat({
               text: `⚠️ ${t.videoError}\n\n${res.data.answer}`,
             }]);
           } catch (textErr: any) {
-            throw textErr;
+            // Both video AND text Cloud Functions failed → try Gemini fallback
+            console.warn('[AvatarChat] Cloud Functions unavailable, switching to Gemini fallback');
+            setUseFallback(true);
+            const answer = await callGeminiFallbackWithAnswers(q, ownerUid, ownerName, locale);
+            setMessages(prev => [...prev, { id: Date.now() + '-gf', role: 'avatar', text: answer }]);
           }
         } finally {
           setGenerating(false);
         }
 
-      } else {
+      } else if (!useFallback && isFirebaseClientConfigured()) {
         // ── TEXT MODE via queryAvatar Cloud Function ─────────────────────────
         setLoading(true);
-        const fns = getFunctions(getFirebaseApp(), 'us-central1');
-        const queryFn = httpsCallable<
-          { question: string; ownerUid: string; ownerName: string; language: string; topK: number },
-          { answer: string; chunks: number }
-        >(fns, 'queryAvatar');
+        try {
+          const fns = getFunctions(getFirebaseApp(), 'us-central1');
+          const queryFn = httpsCallable<
+            { question: string; ownerUid: string; ownerName: string; language: string; topK: number },
+            { answer: string; chunks: number }
+          >(fns, 'queryAvatar');
 
-        const res = await queryFn({
-          question: q,
-          ownerUid,
-          ownerName,
-          language: locale,
-          topK:     6,
-        });
-        setMessages(prev => [...prev, {
-          id:   Date.now() + '-a',
-          role: 'avatar',
-          text: res.data.answer,
-        }]);
+          const res = await queryFn({
+            question: q,
+            ownerUid,
+            ownerName,
+            language: locale,
+            topK:     6,
+          });
+          setMessages(prev => [...prev, {
+            id:   Date.now() + '-a',
+            role: 'avatar',
+            text: res.data.answer,
+          }]);
+        } catch (fnErr: any) {
+          // Cloud Functions not deployed → switch to Gemini fallback permanently
+          console.warn('[AvatarChat] queryAvatar Cloud Function failed, switching to Gemini fallback:', fnErr?.message);
+          setUseFallback(true);
+          const answer = await callGeminiFallbackWithAnswers(q, ownerUid, ownerName, locale);
+          setMessages(prev => [...prev, { id: Date.now() + '-gfb', role: 'avatar', text: answer }]);
+        } finally {
+          setLoading(false);
+        }
+
+      } else {
+        // ── GEMINI FALLBACK MODE (Cloud Functions unavailable) ───────────────
+        setLoading(true);
+        const answer = await callGeminiFallbackWithAnswers(q, ownerUid, ownerName, locale);
+        setMessages(prev => [...prev, { id: Date.now() + '-g', role: 'avatar', text: answer }]);
         setLoading(false);
       }
 
@@ -308,7 +420,7 @@ export default function AvatarChat({
               : { background: 'hsl(30 10% 20%)', color: DM, border: '1px solid hsl(30 10% 25%)' }
             }
           >
-            {isAvatarReady ? t.videoMode : t.textMode}
+            {isAvatarReady && !useFallback ? t.videoMode : useFallback ? t.fallbackMode : t.textMode}
           </span>
         </div>
 

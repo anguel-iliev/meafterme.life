@@ -15,7 +15,9 @@ const nextConfig = {
     NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
     NEXT_PUBLIC_FIREBASE_APP_ID:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
     NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID:     process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || '',
-    NEXT_PUBLIC_GEMINI_API_KEY:              process.env.NEXT_PUBLIC_GEMINI_API_KEY || 'AIzaSyCfvvEnh5V2ZrXWoqpSbGEAakCY5RKyxlg',
+    // ⚠️ SECURITY: Set NEXT_PUBLIC_GEMINI_API_KEY in .env.local or cPanel Environment Variables.
+    // NEVER hardcode API keys here — they are exposed to the browser.
+    NEXT_PUBLIC_GEMINI_API_KEY:              process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
   },
 };
 
