@@ -297,6 +297,9 @@ export default function AvatarChat({
   function handleFnError(err: any) {
     const code    = err?.code ?? '';
     const message = err?.message ?? String(err);
+    const details = err?.details ?? '';
+
+    console.error('[AvatarChat] Error:', { code, message, details, err });
 
     // Detect "function not found / not deployed" errors
     const isNotDeployed =
@@ -306,22 +309,52 @@ export default function AvatarChat({
       message.includes('not found')     ||
       message.includes('does not exist');
 
+    // Detect secret/API key errors
+    const isSecretError =
+      message.includes('Secret') ||
+      message.includes('secret') ||
+      message.includes('API key') ||
+      message.includes('PERMISSION_DENIED') ||
+      code === 'functions/permission-denied';
+
+    // Detect auth errors
+    const isAuthError =
+      code === 'functions/unauthenticated' ||
+      message.includes('unauthenticated') ||
+      message.includes('Must be authenticated');
+
     if (isNotDeployed) {
       setFnError('not-deployed');
       setMessages(prev => [...prev, {
         id:    `e-${Date.now()}`,
         role:  'avatar',
         error: true,
+        text:  `⚠️ ${t.funcsNotReady}\n${t.funcsAction}`,
+      }]);
+    } else if (isAuthError) {
+      setMessages(prev => [...prev, {
+        id:    `e-${Date.now()}`,
+        role:  'avatar',
+        error: true,
         text:  locale === 'bg'
-          ? `⚠️ ${t.funcsNotReady}\n${t.funcsAction}`
-          : `⚠️ ${t.funcsNotReady}\n${t.funcsAction}`,
+          ? '⚠️ Трябва да сте влезли в профила си, за да използвате AI аватара.'
+          : '⚠️ You must be logged in to use the AI avatar.',
+      }]);
+    } else if (isSecretError) {
+      setMessages(prev => [...prev, {
+        id:    `e-${Date.now()}`,
+        role:  'avatar',
+        error: true,
+        text:  locale === 'bg'
+          ? '⚠️ API ключовете за AI услугите не са конфигурирани. Свържете се с администратора.'
+          : '⚠️ AI service API keys are not configured. Please contact the administrator.',
       }]);
     } else {
       setMessages(prev => [...prev, {
         id:    `e-${Date.now()}`,
         role:  'avatar',
         error: true,
-        text:  `⚠️ ${message.slice(0, 300)}`,
+        text:  `⚠️ [${code || 'error'}] ${message.slice(0, 300)}${details ? `\n${String(details).slice(0, 100)}` : ''}`,
       }]);
     }
   }
