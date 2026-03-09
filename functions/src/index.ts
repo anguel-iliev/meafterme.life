@@ -1,7 +1,7 @@
 /**
  * MEafterMe — Firebase Cloud Functions
  * RAG Pipeline: Index → Chunk → Embed → Store → Query → Answer
- * Version: 1.1 — Added cloneVoice + generateAvatarVideo
+ * Version: 1.2 — Firebase Secrets auto-setup on deploy
  *
  * Functions exported:
  *  1. onMemoryUploaded   — Firestore trigger: indexes a file when memory doc is created
