@@ -1,12 +1,15 @@
 /**
  * MEafterMe — Firebase Cloud Functions
  * RAG Pipeline: Index → Chunk → Embed → Store → Query → Answer
+ * Version: 1.1 — Added cloneVoice + generateAvatarVideo
  *
  * Functions exported:
  *  1. onMemoryUploaded   — Firestore trigger: indexes a file when memory doc is created
- *  2. queryAvatar        — HTTPS callable: vector search + Claude streaming answer
+ *  2. queryAvatar        — HTTPS callable: vector search + Claude answer (Anthropic)
  *  3. transcribeAudio    — HTTPS callable: transcribes audio/video via OpenAI Whisper
  *  4. deleteVectorIndex  — Firestore trigger: cleans up vectors when memory is deleted
+ *  5. cloneVoice         — HTTPS callable: clones user voice via ElevenLabs
+ *  6. generateAvatarVideo — HTTPS callable: RAG + Claude + ElevenLabs + D-ID video
  */
 
 import { initializeApp } from 'firebase-admin/app';
