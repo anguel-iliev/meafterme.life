@@ -852,3 +852,4 @@ export const generateAvatarVideo = onCall(
     };
   }
 );
+
