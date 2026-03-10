@@ -1,7 +1,7 @@
 /**
  * MEafterMe — Firebase Cloud Functions
  * RAG Pipeline: Index → Chunk → Embed → Store → Query → Answer
- * Version: 1.4 — Updated Claude model to haiku-4-5 (3-5-haiku retired Feb 2026)
+ * Version: 1.5 — CORS fix for afterme.life domain
  *
  * Functions exported:
  *  1. onMemoryUploaded    — Firestore trigger: indexes a file when memory doc is created
@@ -25,6 +25,15 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 initializeApp();
 const db  = getFirestore();
 const gcs = getStorage();
+
+// ─── CORS — allow afterme.life + localhost for dev ────────────────────────────
+// true = allow all origins (Firebase SDK sends Bearer token so auth is still enforced)
+const ALLOWED_ORIGINS: string[] = [
+  'https://afterme.life',
+  'https://www.afterme.life',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
 
 // ─── Secrets (stored in Firebase Secret Manager, never in client bundle) ──────
 const OPENAI_API_KEY      = defineSecret('OPENAI_API_KEY');
@@ -242,6 +251,7 @@ export const transcribeAudio = onCall(
     secrets: [OPENAI_API_KEY],
     timeoutSeconds: 300,
     memory: '1GiB',
+    cors: ALLOWED_ORIGINS,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
@@ -339,6 +349,7 @@ export const queryAvatar = onCall(
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY],
     timeoutSeconds: 120,
     memory: '256MiB',
+    cors: ALLOWED_ORIGINS,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
@@ -555,6 +566,7 @@ export const cloneVoice = onCall(
     secrets: [ELEVENLABS_API_KEY],
     timeoutSeconds: 300,
     memory: '1GiB',
+    cors: ALLOWED_ORIGINS,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
@@ -646,6 +658,7 @@ export const pingAvatar = onCall(
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
     timeoutSeconds: 30,
     memory: '256MiB',
+    cors: ALLOWED_ORIGINS,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
@@ -740,6 +753,7 @@ export const generateAvatarVideo = onCall(
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
     timeoutSeconds: 300,
     memory: '512MiB',
+    cors: ALLOWED_ORIGINS,
   },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
