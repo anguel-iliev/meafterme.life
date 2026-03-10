@@ -71,9 +71,9 @@ jobs:
           username:    ${{ secrets.FTP_USERNAME }}
           password:    ${{ secrets.FTP_PASSWORD }}
           local-dir:   ./out/
-          server-dir:  /
-          dangerous-clean-slate: true
-          exclude: |
+         server-dir: /meafterme/
+         dangerous-clean-slate: true
+         exclude: |
             **/.git*
             **/.git*/**
             **/node_modules/**
