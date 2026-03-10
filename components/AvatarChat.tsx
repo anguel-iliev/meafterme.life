@@ -247,10 +247,12 @@ export default function AvatarChat({
           } else {
             // Video pipeline had an issue but we have the text answer — show it gracefully
             console.warn('[AvatarChat] Video fallback triggered:', failStep);
+            // Show failStep detail so user/dev can debug
+            const debugNote = failStep ? ` ⚠️ [${failStep}]` : '';
             setMessages(prev => [...prev, {
               id:   `tf-${Date.now()}`,
               role: 'avatar',
-              text: answerText ?? '',
+              text: (answerText ?? '') + debugNote,
             }]);
           }
 
