@@ -27,7 +27,7 @@
  *   │   • Static photo (before first question)    │
  *   │   • Video player (after video generated)    │
  *   │   • Loading animation (generating)          │
- *   │   [ ~55% of height ]                        │
+ *   │   [ ~37% of height ]                        │
  *   │                                             │
  *   ├─────────────────────────────────────────────┤
  *   │  Chat transcript (scrollable)               │
@@ -433,10 +433,10 @@ export default function AvatarChat({
         )}
       </div>
 
-      {/* ══ AVATAR DISPLAY AREA (~55% height) ════════════════════════════════ */}
+      {/* ══ AVATAR DISPLAY AREA (~37% height) ════════════════════════════════ */}
       <div
         className="flex-shrink-0 relative overflow-hidden"
-        style={{ flex: '0 0 55%', background: DARK, borderBottom: `1px solid ${BDR}` }}
+        style={{ flex: '0 0 37%', background: DARK, borderBottom: `1px solid ${BDR}` }}
       >
 
         {/* ── No setup banner ── */}

@@ -697,9 +697,9 @@ export const pingAvatar = onCall(
       const k = DID_API_KEY.value();
       if (!k) { results.did = 'EMPTY KEY'; }
       else {
-        const auth = Buffer.from(k).toString('base64');
+        // D-ID key format is already "API_USER:API_PASSWORD" — use directly as Basic auth value
         const r = await fetch('https://api.d-id.com/talks?limit=1', {
-          headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
+          headers: { 'Authorization': `Basic ${k}`, 'Accept': 'application/json' },
         });
         results.did = r.ok ? 'OK' : `HTTP ${r.status}: ${await r.text().then(t => t.slice(0, 100))}`;
       }
@@ -885,7 +885,8 @@ export const generateAvatarVideo = onCall(
       const didKey = DID_API_KEY.value();
       if (!didKey) throw new Error('DID_API_KEY secret is empty');
 
-      const didAuth = Buffer.from(didKey).toString('base64');
+      // D-ID key format: "API_USER:API_PASSWORD" — already correct for Basic auth, use directly
+      const didAuth = didKey;
 
       const createResp = await fetch('https://api.d-id.com/talks', {
         method:  'POST',
