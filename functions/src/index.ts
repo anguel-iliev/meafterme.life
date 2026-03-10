@@ -1,15 +1,16 @@
 /**
  * MEafterMe — Firebase Cloud Functions
  * RAG Pipeline: Index → Chunk → Embed → Store → Query → Answer
- * Version: 1.2 — Firebase Secrets auto-setup on deploy
+ * Version: 1.4 — Updated Claude model to haiku-4-5 (3-5-haiku retired Feb 2026)
  *
  * Functions exported:
- *  1. onMemoryUploaded   — Firestore trigger: indexes a file when memory doc is created
- *  2. queryAvatar        — HTTPS callable: vector search + Claude answer (Anthropic)
- *  3. transcribeAudio    — HTTPS callable: transcribes audio/video via OpenAI Whisper
- *  4. deleteVectorIndex  — Firestore trigger: cleans up vectors when memory is deleted
- *  5. cloneVoice         — HTTPS callable: clones user voice via ElevenLabs
+ *  1. onMemoryUploaded    — Firestore trigger: indexes a file when memory doc is created
+ *  2. queryAvatar         — HTTPS callable: vector search + Claude answer (Anthropic)
+ *  3. transcribeAudio     — HTTPS callable: transcribes audio/video via OpenAI Whisper
+ *  4. deleteVectorIndex   — Firestore trigger: cleans up vectors when memory is deleted
+ *  5. cloneVoice          — HTTPS callable: clones user voice via ElevenLabs
  *  6. generateAvatarVideo — HTTPS callable: RAG + Claude + ElevenLabs + D-ID video
+ *  7. pingAvatar          — HTTPS callable: health check / API key diagnostics
  */
 
 import { initializeApp } from 'firebase-admin/app';
@@ -344,9 +345,9 @@ export const queryAvatar = onCall(
 
     const {
       question,
-      ownerUid,        // whose profile to query
+      ownerUid,
       ownerName = 'this person',
-      language  = 'bg', // 'bg' or 'en'
+      language  = 'bg',
       topK      = 6,
     } = request.data as {
       question:  string;
@@ -360,7 +361,6 @@ export const queryAvatar = onCall(
     if (!ownerUid)          throw new HttpsError('invalid-argument', 'ownerUid is required.');
 
     // ── Access control ────────────────────────────────────────────────────────
-    // Allow: owner themselves OR someone with a profile_share
     const viewerUid   = request.auth.uid;
     const viewerEmail = request.auth.token.email || '';
     const isOwner     = viewerUid === ownerUid;
@@ -374,39 +374,7 @@ export const queryAvatar = onCall(
       if (shareSnap.empty) throw new HttpsError('permission-denied', 'Access denied.');
     }
 
-    // ── Step 1: Embed the question ─────────────────────────────────────────────
-    const [questionEmbedding] = await getEmbeddings([question], OPENAI_API_KEY.value());
-
-    // ── Step 2: Load all vectors for this owner ────────────────────────────────
-    const vectorSnap = await db.collection('vectors')
-      .where('uid', '==', ownerUid)
-      .get();
-
-    if (vectorSnap.empty) {
-      return {
-        answer: language === 'bg'
-          ? 'Все още няма качено съдържание в този профил, върху което да базирам отговора си.'
-          : 'There is no uploaded content in this profile yet to base my answer on.',
-        context: [],
-        chunks:  0,
-      };
-    }
-
-    // ── Step 3: Cosine similarity ranking ─────────────────────────────────────
-    const scored = vectorSnap.docs.map(doc => {
-      const d = doc.data() as VectorDoc;
-      return { ...d, score: cosineSimilarity(questionEmbedding, d.embedding) };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-    const topChunks = scored.slice(0, topK).filter(c => c.score > 0.3);
-
-    // ── Step 4: Build context ─────────────────────────────────────────────────
-    const context = topChunks.map((c, i) =>
-      `[Source ${i + 1} — ${c.fileName}]\n${c.chunkText}`
-    ).join('\n\n---\n\n');
-
-    // ── Step 5: Also load life-question answers ───────────────────────────────
+    // ── Step 1: Load life-question answers (always available, no API needed) ──
     const answersSnap = await db.collection('answers')
       .where('uid', '==', ownerUid)
       .get();
@@ -416,29 +384,85 @@ export const queryAvatar = onCall(
       .map(d => `Q${d.questionId}: ${d.answer}`)
       .join('\n');
 
-    // ── Step 6: Constraint-based system prompt ────────────────────────────────
+    // ── Step 2: Try vector search (OpenAI embeddings) — graceful fallback ─────
+    let context = '';
+    let topChunks: Array<{ fileName: string; chunkText: string; score: number }> = [];
+    let usedEmbeddings = false;
+
+    try {
+      const openaiKey = OPENAI_API_KEY.value();
+      if (!openaiKey) throw new Error('OPENAI_API_KEY is empty');
+
+      const [questionEmbedding] = await getEmbeddings([question], openaiKey);
+
+      const vectorSnap = await db.collection('vectors')
+        .where('uid', '==', ownerUid)
+        .get();
+
+      if (!vectorSnap.empty) {
+        const scored = vectorSnap.docs.map(doc => {
+          const d = doc.data() as VectorDoc;
+          return { ...d, score: cosineSimilarity(questionEmbedding, d.embedding) };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        topChunks = scored.slice(0, topK).filter(c => c.score > 0.3);
+        context   = topChunks.map((c, i) =>
+          `[Source ${i + 1} — ${c.fileName}]\n${c.chunkText}`
+        ).join('\n\n---\n\n');
+        usedEmbeddings = true;
+      }
+    } catch (embErr) {
+      // Embeddings failed — log and continue without vector context
+      functions.logger.warn('[queryAvatar] Embeddings step failed (will answer from life-answers only):', String(embErr));
+      context = '';
+    }
+
+    // If no context at all and no answers — return early
+    if (!context && !answersContext) {
+      return {
+        answer: language === 'bg'
+          ? 'Все още няма качено съдържание в този профил, върху което да базирам отговора си.'
+          : 'There is no uploaded content in this profile yet to base my answer on.',
+        context: [],
+        chunks:  0,
+      };
+    }
+
+    // ── Step 3: Build system prompt ───────────────────────────────────────────
     const systemPrompt = language === 'bg'
       ? buildSystemPromptBG(ownerName, context, answersContext)
       : buildSystemPromptEN(ownerName, context, answersContext);
 
-    // ── Step 7: Call Claude ───────────────────────────────────────────────────
-    const Anthropic = require('@anthropic-ai/sdk').default;
-    const claude    = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    // ── Step 4: Call Claude ───────────────────────────────────────────────────
+    try {
+      const anthropicKey = ANTHROPIC_API_KEY.value();
+      if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY is empty');
 
-    const message = await claude.messages.create({
-      model:      'claude-3-5-haiku-20241022', // fast + cheap; upgrade to sonnet for quality
-      max_tokens: 1024,
-      system:     systemPrompt,
-      messages:   [{ role: 'user', content: question }],
-    });
+      const Anthropic = require('@anthropic-ai/sdk').default;
+      const claude    = new Anthropic({ apiKey: anthropicKey });
 
-    const answer = (message.content[0] as { type: string; text: string }).text;
+      const message = await claude.messages.create({
+        model:      'claude-haiku-4-5',
+        max_tokens: 1024,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: question }],
+      });
 
-    return {
-      answer,
-      context: topChunks.map(c => ({ file: c.fileName, score: Math.round(c.score * 100) / 100, snippet: c.chunkText.slice(0, 120) + '…' })),
-      chunks:  topChunks.length,
-    };
+      const answer = (message.content[0] as { type: string; text: string }).text;
+
+      functions.logger.info(`[queryAvatar] OK — usedEmbeddings=${usedEmbeddings}, chunks=${topChunks.length}`);
+
+      return {
+        answer,
+        context: topChunks.map(c => ({ file: c.fileName, score: Math.round(c.score * 100) / 100, snippet: c.chunkText.slice(0, 120) + '…' })),
+        chunks:  topChunks.length,
+      };
+    } catch (claudeErr: any) {
+      const msg = String(claudeErr?.message || claudeErr);
+      functions.logger.error('[queryAvatar] Claude failed:', msg);
+      throw new HttpsError('internal',
+        `Claude API error: ${msg.slice(0, 300)}`);
+    }
   }
 );
 
@@ -615,17 +639,90 @@ export const cloneVoice = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// FUNCTION 7: pingAvatar — health check & API key diagnostics
+// ═══════════════════════════════════════════════════════════════════════════════
+export const pingAvatar = onCall(
+  {
+    secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be authenticated.');
+
+    const results: Record<string, string> = {};
+
+    // Test OpenAI
+    try {
+      const k = OPENAI_API_KEY.value();
+      if (!k) { results.openai = 'EMPTY KEY'; }
+      else {
+        const OpenAI = require('openai').default;
+        const oa = new OpenAI({ apiKey: k });
+        await oa.models.list();
+        results.openai = 'OK';
+      }
+    } catch (e: any) { results.openai = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
+
+    // Test Anthropic
+    try {
+      const k = ANTHROPIC_API_KEY.value();
+      if (!k) { results.anthropic = 'EMPTY KEY'; }
+      else {
+        const Anthropic = require('@anthropic-ai/sdk').default;
+        const cl = new Anthropic({ apiKey: k });
+        const r = await cl.messages.create({
+          model: 'claude-haiku-4-5',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'ping' }],
+        });
+        results.anthropic = r.content.length > 0 ? 'OK' : 'NO RESPONSE';
+      }
+    } catch (e: any) { results.anthropic = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
+
+    // Test ElevenLabs
+    try {
+      const k = ELEVENLABS_API_KEY.value();
+      if (!k) { results.elevenlabs = 'EMPTY KEY'; }
+      else {
+        const r = await fetch('https://api.elevenlabs.io/v1/user', {
+          headers: { 'xi-api-key': k },
+        });
+        results.elevenlabs = r.ok ? 'OK' : `HTTP ${r.status}: ${await r.text().then(t => t.slice(0, 100))}`;
+      }
+    } catch (e: any) { results.elevenlabs = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
+
+    // Test D-ID
+    try {
+      const k = DID_API_KEY.value();
+      if (!k) { results.did = 'EMPTY KEY'; }
+      else {
+        const auth = Buffer.from(k).toString('base64');
+        const r = await fetch('https://api.d-id.com/talks?limit=1', {
+          headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
+        });
+        results.did = r.ok ? 'OK' : `HTTP ${r.status}: ${await r.text().then(t => t.slice(0, 100))}`;
+      }
+    } catch (e: any) { results.did = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
+
+    functions.logger.info('[pingAvatar] Diagnostics:', results);
+    return { status: 'checked', results };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // FUNCTION 6: generateAvatarVideo
 // HTTPS Callable — main pipeline:
-//   1. Get answer text from Gemini (RAG-based)
+//   1. Get answer text from Claude (RAG-based, with graceful fallback)
 //   2. Generate audio via ElevenLabs with cloned voice
-//   3. Send photo + audio to D-ID to create talking avatar video
-//   4. Return video URL
+//   3. Upload audio to Firebase Storage
+//   4. Send photo + audio to D-ID to create talking avatar video
+//   5. Return video URL — OR text-only answer if video pipeline fails
 // ═══════════════════════════════════════════════════════════════════════════════
 export const generateAvatarVideo = onCall(
   {
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
-    timeoutSeconds: 180,
+    timeoutSeconds: 240,
     memory: '512MiB',
   },
   async (request) => {
@@ -649,7 +746,6 @@ export const generateAvatarVideo = onCall(
     const viewerUid = request.auth.uid;
     const isOwner   = viewerUid === ownerUid;
 
-    // ── Access check ─────────────────────────────────────────────────────────
     if (!isOwner) {
       const viewerEmail = request.auth.token.email || '';
       const shareSnap = await db.collection('profile_shares')
@@ -666,33 +762,16 @@ export const generateAvatarVideo = onCall(
 
     if (!config?.voiceId || !config?.photoUrl) {
       throw new HttpsError('failed-precondition',
-        'Avatar not configured. Please set up a reference photo and voice first.');
+        'Avatar not configured. Please set up photos and clone your voice first.');
     }
 
     const voiceId  = config.voiceId  as string;
     const photoUrl = config.photoUrl as string;
 
-    // ── Step 1: Get text answer via RAG (reuse queryAvatar logic) ─────────────
+    // ── Step 1: Get text answer via RAG ───────────────────────────────────────
     let answerText = '';
     try {
-      // Embed question
-      const [questionEmbedding] = await getEmbeddings([question], OPENAI_API_KEY.value());
-
-      // Load vectors
-      const vectorSnap = await db.collection('vectors').where('uid', '==', ownerUid).get();
-
-      let context = '';
-      if (!vectorSnap.empty) {
-        const scored = vectorSnap.docs.map(doc => {
-          const d = doc.data() as VectorDoc;
-          return { ...d, score: cosineSimilarity(questionEmbedding, d.embedding) };
-        });
-        scored.sort((a, b) => b.score - a.score);
-        const topChunks = scored.slice(0, 5).filter(c => c.score > 0.3);
-        context = topChunks.map((c, i) => `[${i+1} — ${c.fileName}]\n${c.chunkText}`).join('\n\n---\n\n');
-      }
-
-      // Load answers
+      // Load answers from Firestore (no API needed)
       const answersSnap = await db.collection('answers').where('uid', '==', ownerUid).get();
       const answersContext = answersSnap.docs
         .map(d => d.data())
@@ -700,33 +779,62 @@ export const generateAvatarVideo = onCall(
         .map(d => `Q${d.questionId}: ${d.answer}`)
         .join('\n');
 
+      // Try vector search with OpenAI embeddings
+      let context = '';
+      try {
+        const openaiKey = OPENAI_API_KEY.value();
+        if (openaiKey) {
+          const [qEmb] = await getEmbeddings([question], openaiKey);
+          const vectorSnap = await db.collection('vectors').where('uid', '==', ownerUid).get();
+          if (!vectorSnap.empty) {
+            const scored = vectorSnap.docs.map(doc => {
+              const d = doc.data() as VectorDoc;
+              return { ...d, score: cosineSimilarity(qEmb, d.embedding) };
+            });
+            scored.sort((a, b) => b.score - a.score);
+            const top = scored.slice(0, 5).filter(c => c.score > 0.3);
+            context = top.map((c, i) => `[${i+1} — ${c.fileName}]\n${c.chunkText}`).join('\n\n---\n\n');
+          }
+        }
+      } catch (embErr) {
+        functions.logger.warn('[generateAvatarVideo] Embeddings failed, continuing without vector context:', String(embErr));
+      }
+
       const systemPrompt = language === 'bg'
         ? buildSystemPromptBG(ownerName, context, answersContext)
         : buildSystemPromptEN(ownerName, context, answersContext);
 
-      // Call Claude for the answer
+      const anthropicKey = ANTHROPIC_API_KEY.value();
+      if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY secret is empty');
+
       const Anthropic = require('@anthropic-ai/sdk').default;
-      const claude    = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+      const claude    = new Anthropic({ apiKey: anthropicKey });
       const message   = await claude.messages.create({
-        model:      'claude-3-5-haiku-20241022',
-        max_tokens: 500,  // shorter for video — ~30-45 seconds of speech
+        model:      'claude-haiku-4-5',
+        max_tokens: 500,
         system:     systemPrompt,
         messages:   [{ role: 'user', content: question }],
       });
       answerText = (message.content[0] as { type: string; text: string }).text;
-    } catch (err) {
-      throw new HttpsError('internal', `RAG answer generation failed: ${String(err)}`);
+      functions.logger.info('[generateAvatarVideo] Step 1 RAG OK, answer length:', answerText.length);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      functions.logger.error('[generateAvatarVideo] Step 1 RAG FAILED:', msg);
+      throw new HttpsError('internal', `Step 1 (RAG/Claude) failed: ${msg.slice(0, 300)}`);
     }
 
-    // ── Step 2: Generate audio with ElevenLabs cloned voice ───────────────────
+    // ── Step 2: Generate audio with ElevenLabs ────────────────────────────────
     let audioBase64 = '';
     try {
+      const elKey = ELEVENLABS_API_KEY.value();
+      if (!elKey) throw new Error('ELEVENLABS_API_KEY secret is empty');
+
       const ttsResp = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
         {
           method:  'POST',
           headers: {
-            'xi-api-key':   ELEVENLABS_API_KEY.value(),
+            'xi-api-key':   elKey,
             'Content-Type': 'application/json',
             'Accept':       'audio/mpeg',
           },
@@ -740,19 +848,22 @@ export const generateAvatarVideo = onCall(
 
       if (!ttsResp.ok) {
         const errText = await ttsResp.text();
-        throw new Error(`ElevenLabs TTS error ${ttsResp.status}: ${errText.slice(0, 200)}`);
+        throw new Error(`ElevenLabs HTTP ${ttsResp.status}: ${errText.slice(0, 200)}`);
       }
 
-      const audioBuffer = Buffer.from(await ttsResp.arrayBuffer());
-      audioBase64 = audioBuffer.toString('base64');
-    } catch (err) {
-      throw new HttpsError('internal', `Voice synthesis failed: ${String(err)}`);
+      audioBase64 = Buffer.from(await ttsResp.arrayBuffer()).toString('base64');
+      functions.logger.info('[generateAvatarVideo] Step 2 ElevenLabs TTS OK');
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      functions.logger.error('[generateAvatarVideo] Step 2 ElevenLabs FAILED:', msg);
+      // GRACEFUL FALLBACK: return text answer without video
+      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 2 (ElevenLabs): ${msg.slice(0, 200)}` };
     }
 
-    // ── Step 3: Upload audio to Firebase Storage (D-ID needs a URL) ──────────
+    // ── Step 3: Upload audio to Firebase Storage ──────────────────────────────
     let audioUrl = '';
     try {
-      const bucket = gcs.bucket();
+      const bucket    = gcs.bucket();
       const audioPath = `avatar_audio/${ownerUid}/${Date.now()}.mp3`;
       const audioFile = bucket.file(audioPath);
       await audioFile.save(Buffer.from(audioBase64, 'base64'), {
@@ -761,16 +872,21 @@ export const generateAvatarVideo = onCall(
       });
       await audioFile.makePublic();
       audioUrl = `https://storage.googleapis.com/${bucket.name}/${audioPath}`;
-    } catch (err) {
-      throw new HttpsError('internal', `Audio upload failed: ${String(err)}`);
+      functions.logger.info('[generateAvatarVideo] Step 3 Audio uploaded:', audioUrl);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      functions.logger.error('[generateAvatarVideo] Step 3 Storage upload FAILED:', msg);
+      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 3 (Storage): ${msg.slice(0, 200)}` };
     }
 
     // ── Step 4: Create D-ID talking avatar video ──────────────────────────────
     let videoUrl = '';
     try {
-      const didAuth = Buffer.from(DID_API_KEY.value()).toString('base64');
+      const didKey = DID_API_KEY.value();
+      if (!didKey) throw new Error('DID_API_KEY secret is empty');
 
-      // Create talk
+      const didAuth = Buffer.from(didKey).toString('base64');
+
       const createResp = await fetch('https://api.d-id.com/talks', {
         method:  'POST',
         headers: {
@@ -780,76 +896,60 @@ export const generateAvatarVideo = onCall(
         },
         body: JSON.stringify({
           source_url: photoUrl,
-          script: {
-            type:      'audio',
-            audio_url: audioUrl,
-          },
-          config: {
-            fluent: true,
-            pad_audio: 0.5,
-            stitch: true,
-          },
+          script: { type: 'audio', audio_url: audioUrl },
+          config:  { fluent: true, pad_audio: 0.5, stitch: true },
         }),
       });
 
       if (!createResp.ok) {
         const errText = await createResp.text();
-        throw new Error(`D-ID create error ${createResp.status}: ${errText.slice(0, 300)}`);
+        throw new Error(`D-ID create HTTP ${createResp.status}: ${errText.slice(0, 300)}`);
       }
 
       const createData = await createResp.json() as { id: string; status: string };
-      const talkId = createData.id;
+      const talkId     = createData.id;
+      functions.logger.info('[generateAvatarVideo] D-ID talk created:', talkId);
 
-      // Poll for completion (D-ID typically takes 10-30 seconds)
+      // Poll for completion
       let attempts = 0;
-      const MAX_ATTEMPTS = 30;
+      const MAX_ATTEMPTS = 40; // 40 × 3s = 120s max
 
       while (attempts < MAX_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, 3000)); // wait 3s between polls
+        await new Promise(r => setTimeout(r, 3000));
         attempts++;
 
         const pollResp = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-          headers: {
-            'Authorization': `Basic ${didAuth}`,
-            'Accept':        'application/json',
-          },
+          headers: { 'Authorization': `Basic ${didAuth}`, 'Accept': 'application/json' },
         });
 
         if (!pollResp.ok) continue;
 
         const pollData = await pollResp.json() as {
-          status: string;
-          result_url?: string;
-          error?: { description: string };
+          status: string; result_url?: string; error?: { description: string };
         };
 
-        functions.logger.info(`D-ID poll attempt ${attempts}: status=${pollData.status}`);
+        functions.logger.info(`[generateAvatarVideo] D-ID poll ${attempts}: ${pollData.status}`);
 
         if (pollData.status === 'done' && pollData.result_url) {
           videoUrl = pollData.result_url;
           break;
         }
-
         if (pollData.status === 'error') {
           throw new Error(`D-ID error: ${pollData.error?.description || 'unknown'}`);
         }
       }
 
-      if (!videoUrl) {
-        throw new Error('D-ID video generation timed out after 90 seconds.');
-      }
+      if (!videoUrl) throw new Error('D-ID timed out after 120s.');
 
-    } catch (err) {
-      throw new HttpsError('internal', `Video generation failed: ${String(err)}`);
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      functions.logger.error('[generateAvatarVideo] Step 4 D-ID FAILED:', msg);
+      // GRACEFUL FALLBACK: return text answer without video
+      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 4 (D-ID): ${msg.slice(0, 200)}` };
     }
 
-    functions.logger.info(`✅ Avatar video generated for ${ownerUid}: ${videoUrl}`);
-
-    return {
-      videoUrl,
-      answerText,
-      talkId: videoUrl.split('/').slice(-2, -1)[0] || '',
-    };
+    functions.logger.info(`[generateAvatarVideo] ✅ Complete for ${ownerUid}: ${videoUrl}`);
+    return { videoUrl, answerText, talkId: videoUrl.split('/').slice(-2, -1)[0] || '', fallback: false };
   }
 );
 

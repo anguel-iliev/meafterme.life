@@ -222,28 +222,41 @@ export default function AvatarChat({
         try {
           const genFn = httpsCallable<
             { question: string; ownerUid: string; ownerName: string; language: string },
-            { videoUrl: string; answerText: string }
+            { videoUrl: string; answerText: string; fallback?: boolean; failStep?: string }
           >(fns, 'generateAvatarVideo');
 
           // Simulate step progression (approximate timings)
           const stepTimer = setInterval(() => {
             setGenStep(s => Math.min(s + 1, 3));
-          }, 8000); // advance step every ~8s
+          }, 8000);
 
           const result = await genFn({ question: q, ownerUid, ownerName, language: locale });
           clearInterval(stepTimer);
 
-          setActiveVideo(result.data.videoUrl);
-          setMessages(prev => [...prev, {
-            id:       `v-${Date.now()}`,
-            role:     'avatar',
-            text:     result.data.answerText ?? '',
-            videoUrl: result.data.videoUrl,
-          }]);
+          const { videoUrl, answerText, fallback, failStep } = result.data;
+
+          if (videoUrl && !fallback) {
+            // Full video response ✅
+            setActiveVideo(videoUrl);
+            setMessages(prev => [...prev, {
+              id:       `v-${Date.now()}`,
+              role:     'avatar',
+              text:     answerText ?? '',
+              videoUrl: videoUrl,
+            }]);
+          } else {
+            // Video pipeline had an issue but we have the text answer — show it gracefully
+            console.warn('[AvatarChat] Video fallback triggered:', failStep);
+            setMessages(prev => [...prev, {
+              id:   `tf-${Date.now()}`,
+              role: 'avatar',
+              text: answerText ?? '',
+            }]);
+          }
 
         } catch (videoErr: any) {
-          // Video failed → fall back to text (queryAvatar)
-          console.error('[AvatarChat] generateAvatarVideo failed:', videoErr);
+          // Hard failure → fall back to queryAvatar (text only)
+          console.error('[AvatarChat] generateAvatarVideo hard error:', videoErr);
           try {
             const queryFn = httpsCallable<
               { question: string; ownerUid: string; ownerName: string; language: string; topK: number },
@@ -253,7 +266,7 @@ export default function AvatarChat({
             setMessages(prev => [...prev, {
               id:   `tf-${Date.now()}`,
               role: 'avatar',
-              text: `⚠️ ${t.videoError}\n\n${res.data.answer}`,
+              text: res.data.answer,
             }]);
           } catch (textErr: any) {
             handleFnError(textErr);
