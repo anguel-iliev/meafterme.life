@@ -186,9 +186,9 @@ export default function AvatarChat({
     }
   }, [activeVideo]);
 
-  // Avatar is "ready" when voice clone + photo + setupComplete are all set
+  // Avatar is "ready" when voice clone + photo are set (setupComplete is optional)
+  // NOTE: setupComplete removed from check — voiceId + photoUrl are sufficient
   const isAvatarReady = !!(
-    avatarConfig?.setupComplete &&
     avatarConfig?.voiceStatus === 'ready' &&
     avatarConfig?.photoUrl &&
     avatarConfig?.voiceId
@@ -245,14 +245,21 @@ export default function AvatarChat({
               videoUrl: videoUrl,
             }]);
           } else {
-            // Video pipeline had an issue but we have the text answer — show it gracefully
+            // Video pipeline had an issue but we have the text answer — show it with debug info
             console.warn('[AvatarChat] Video fallback triggered:', failStep);
-            // Show failStep detail so user/dev can debug
-            const debugNote = failStep ? ` ⚠️ [${failStep}]` : '';
+            // Show failStep as a separate error message for visibility
+            if (failStep) {
+              setMessages(prev => [...prev, {
+                id:    `fe-${Date.now()}`,
+                role:  'avatar',
+                error: true,
+                text:  `⚠️ ${t.videoError}\n🔍 Debug: ${failStep}`,
+              }]);
+            }
             setMessages(prev => [...prev, {
               id:   `tf-${Date.now()}`,
               role: 'avatar',
-              text: (answerText ?? '') + debugNote,
+              text: answerText ?? '',
             }]);
           }
 

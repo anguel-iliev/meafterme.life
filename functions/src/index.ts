@@ -692,16 +692,31 @@ export const pingAvatar = onCall(
       }
     } catch (e: any) { results.elevenlabs = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
 
-    // Test D-ID
+    // Test D-ID — try multiple auth formats
     try {
       const k = DID_API_KEY.value();
       if (!k) { results.did = 'EMPTY KEY'; }
       else {
-        // D-ID key format is already "API_USER:API_PASSWORD" — use directly as Basic auth value
-        const r = await fetch('https://api.d-id.com/talks?limit=1', {
+        // Try 1: key as-is
+        let r = await fetch('https://api.d-id.com/talks?limit=1', {
           headers: { 'Authorization': `Basic ${k}`, 'Accept': 'application/json' },
         });
-        results.did = r.ok ? 'OK' : `HTTP ${r.status}: ${await r.text().then(t => t.slice(0, 100))}`;
+        if (r.ok) {
+          results.did = `OK (direct key, len=${k.length}, hasColon=${k.includes(':')})`;
+        } else {
+          const status1 = r.status;
+          const body1   = await r.text().then(t => t.slice(0, 100));
+          // Try 2: base64(key)
+          const b64k = Buffer.from(k).toString('base64');
+          r = await fetch('https://api.d-id.com/talks?limit=1', {
+            headers: { 'Authorization': `Basic ${b64k}`, 'Accept': 'application/json' },
+          });
+          if (r.ok) {
+            results.did = `OK (base64 key, len=${k.length}, hasColon=${k.includes(':')})`;
+          } else {
+            results.did = `FAIL attempt1 HTTP ${status1}: ${body1} | attempt2 HTTP ${r.status}`;
+          }
+        }
       }
     } catch (e: any) { results.did = `ERROR: ${String(e.message || e).slice(0, 150)}`; }
 
@@ -715,14 +730,15 @@ export const pingAvatar = onCall(
 // HTTPS Callable — main pipeline:
 //   1. Get answer text from Claude (RAG-based, with graceful fallback)
 //   2. Generate audio via ElevenLabs with cloned voice
-//   3. Upload audio to Firebase Storage
-//   4. Send photo + audio to D-ID to create talking avatar video
-//   5. Return video URL — OR text-only answer if video pipeline fails
+//   3. Upload audio to Firebase Storage (public URL)
+//   4. Make photo publicly accessible (Storage signed URL)
+//   5. Send photo + audio to D-ID to create talking avatar video
+//   6. Return video URL — OR text-only answer if video pipeline fails
 // ═══════════════════════════════════════════════════════════════════════════════
 export const generateAvatarVideo = onCall(
   {
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
-    timeoutSeconds: 240,
+    timeoutSeconds: 300,
     memory: '512MiB',
   },
   async (request) => {
@@ -760,6 +776,13 @@ export const generateAvatarVideo = onCall(
     const configSnap = await db.collection('avatar_configs').doc(ownerUid).get();
     const config     = configSnap.data();
 
+    functions.logger.info('[generateAvatarVideo] Config loaded:', {
+      hasVoiceId:  !!config?.voiceId,
+      hasPhotoUrl: !!config?.photoUrl,
+      voiceStatus: config?.voiceStatus,
+      setupComplete: config?.setupComplete,
+    });
+
     if (!config?.voiceId || !config?.photoUrl) {
       throw new HttpsError('failed-precondition',
         'Avatar not configured. Please set up photos and clone your voice first.');
@@ -767,6 +790,9 @@ export const generateAvatarVideo = onCall(
 
     const voiceId  = config.voiceId  as string;
     const photoUrl = config.photoUrl as string;
+
+    functions.logger.info('[generateAvatarVideo] Starting pipeline for uid:', ownerUid);
+    functions.logger.info('[generateAvatarVideo] photoUrl (first 100):', photoUrl.slice(0, 100));
 
     // ── Step 1: Get text answer via RAG ───────────────────────────────────────
     let answerText = '';
@@ -811,11 +837,15 @@ export const generateAvatarVideo = onCall(
       const claude    = new Anthropic({ apiKey: anthropicKey });
       const message   = await claude.messages.create({
         model:      'claude-haiku-4-5',
-        max_tokens: 500,
+        max_tokens: 400, // keep answer short for TTS (< 1000 chars)
         system:     systemPrompt,
         messages:   [{ role: 'user', content: question }],
       });
       answerText = (message.content[0] as { type: string; text: string }).text;
+      // Truncate to max 900 chars for ElevenLabs TTS (stays under free tier limits)
+      if (answerText.length > 900) {
+        answerText = answerText.slice(0, 897) + '...';
+      }
       functions.logger.info('[generateAvatarVideo] Step 1 RAG OK, answer length:', answerText.length);
     } catch (err: any) {
       const msg = String(err?.message || err);
@@ -828,6 +858,8 @@ export const generateAvatarVideo = onCall(
     try {
       const elKey = ELEVENLABS_API_KEY.value();
       if (!elKey) throw new Error('ELEVENLABS_API_KEY secret is empty');
+
+      functions.logger.info('[generateAvatarVideo] Step 2 TTS: voiceId=', voiceId, 'textLen=', answerText.length);
 
       const ttsResp = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -848,19 +880,20 @@ export const generateAvatarVideo = onCall(
 
       if (!ttsResp.ok) {
         const errText = await ttsResp.text();
-        throw new Error(`ElevenLabs HTTP ${ttsResp.status}: ${errText.slice(0, 200)}`);
+        throw new Error(`ElevenLabs HTTP ${ttsResp.status}: ${errText.slice(0, 300)}`);
       }
 
       audioBase64 = Buffer.from(await ttsResp.arrayBuffer()).toString('base64');
-      functions.logger.info('[generateAvatarVideo] Step 2 ElevenLabs TTS OK');
+      functions.logger.info('[generateAvatarVideo] Step 2 ElevenLabs TTS OK, audioBase64 length:', audioBase64.length);
     } catch (err: any) {
       const msg = String(err?.message || err);
       functions.logger.error('[generateAvatarVideo] Step 2 ElevenLabs FAILED:', msg);
       // GRACEFUL FALLBACK: return text answer without video
-      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 2 (ElevenLabs): ${msg.slice(0, 200)}` };
+      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 2 (ElevenLabs): ${msg.slice(0, 300)}` };
     }
 
-    // ── Step 3: Upload audio to Firebase Storage (public URL for D-ID) ──────────
+    // ── Step 3: Upload audio to Firebase Storage ──────────────────────────────
+    // Use signed URL (1h) — works regardless of UBLA (Uniform Bucket-Level Access)
     let audioUrl = '';
     try {
       const bucket    = gcs.bucket();
@@ -868,79 +901,89 @@ export const generateAvatarVideo = onCall(
       const audioFile = bucket.file(audioPath);
       await audioFile.save(Buffer.from(audioBase64, 'base64'), {
         contentType: 'audio/mpeg',
-        metadata: { cacheControl: 'public, max-age=300' },
+        metadata: { cacheControl: 'public, max-age=3600' },
       });
-      // makePublic() sets ACL — may fail if uniform bucket-level access is on;
-      // fall back to a signed URL that expires in 1 hour
-      try {
-        await audioFile.makePublic();
-        audioUrl = `https://storage.googleapis.com/${bucket.name}/${audioPath}`;
-        functions.logger.info('[generateAvatarVideo] Step 3 Audio public URL:', audioUrl);
-      } catch (aclErr: any) {
-        functions.logger.warn('[generateAvatarVideo] Step 3 makePublic failed, using signed URL:', String(aclErr?.message));
-        const [signedUrl] = await audioFile.getSignedUrl({
-          action:  'read',
-          expires: Date.now() + 60 * 60 * 1000, // 1 hour
-        });
-        audioUrl = signedUrl;
-        functions.logger.info('[generateAvatarVideo] Step 3 Audio signed URL obtained');
-      }
+
+      // Always use signed URL — guarantees accessibility for D-ID regardless of bucket ACL settings
+      const [signedAudioUrl] = await audioFile.getSignedUrl({
+        action:  'read',
+        expires: Date.now() + 2 * 60 * 60 * 1000, // 2 hours
+      });
+      audioUrl = signedAudioUrl;
+      functions.logger.info('[generateAvatarVideo] Step 3 Audio uploaded, signed URL length:', audioUrl.length);
     } catch (err: any) {
       const msg = String(err?.message || err);
       functions.logger.error('[generateAvatarVideo] Step 3 Storage upload FAILED:', msg);
       return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 3 (Storage): ${msg.slice(0, 200)}` };
     }
 
-    // ── Step 3b: Ensure photoUrl is publicly accessible ───────────────────────
-    // firebasestorage.googleapis.com tokens expire — copy photo to public path
-    // OR use a signed URL that D-ID can access
+    // ── Step 3b: Get accessible photo URL for D-ID ────────────────────────────
+    // D-ID needs a plain HTTPS URL — Firebase download URLs with tokens work
+    // but only if token is valid. Use signed URL to guarantee access.
     let publicPhotoUrl = photoUrl;
     try {
-      if (photoUrl.includes('firebasestorage.googleapis.com') || photoUrl.startsWith('gs://')) {
-        // Extract storage path from URL or use gs:// directly
-        const bucket2 = gcs.bucket();
-        let storagePath = '';
-        if (photoUrl.startsWith('gs://')) {
-          storagePath = photoUrl.replace(`gs://${bucket2.name}/`, '');
-        } else {
-          // Extract path from https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}?...
-          const match = photoUrl.match(/\/o\/([^?]+)/);
-          storagePath = match ? decodeURIComponent(match[1]) : '';
-        }
-        if (storagePath) {
-          const photoFile = bucket2.file(storagePath);
-          try {
-            await photoFile.makePublic();
-            publicPhotoUrl = `https://storage.googleapis.com/${bucket2.name}/${storagePath}`;
-            functions.logger.info('[generateAvatarVideo] Step 3b Photo made public:', publicPhotoUrl);
-          } catch {
-            // makePublic failed → generate signed URL (1 hour)
-            const [signedPhotoUrl] = await photoFile.getSignedUrl({
-              action:  'read',
-              expires: Date.now() + 60 * 60 * 1000,
-            });
-            publicPhotoUrl = signedPhotoUrl;
-            functions.logger.info('[generateAvatarVideo] Step 3b Photo signed URL obtained');
-          }
-        }
+      const bucket2 = gcs.bucket();
+      let storagePath = '';
+
+      if (photoUrl.startsWith('gs://')) {
+        storagePath = photoUrl.replace(`gs://${bucket2.name}/`, '');
+      } else if (photoUrl.includes('firebasestorage.googleapis.com')) {
+        // Extract path from: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{encoded-path}?...
+        const match = photoUrl.match(/\/o\/([^?]+)/);
+        storagePath = match ? decodeURIComponent(match[1]) : '';
+      } else if (photoUrl.includes('storage.googleapis.com')) {
+        // Already a public URL: https://storage.googleapis.com/{bucket}/{path}
+        // Try to extract path — if it's already public, use as-is
+        const match = photoUrl.match(/storage\.googleapis\.com\/[^/]+\/(.+)/);
+        storagePath = match ? match[1] : '';
+      }
+
+      if (storagePath) {
+        functions.logger.info('[generateAvatarVideo] Step 3b Photo storage path:', storagePath);
+        const photoFile = bucket2.file(storagePath);
+
+        // Generate signed URL (2 hours) — bypasses ACL/token issues
+        const [signedPhotoUrl] = await photoFile.getSignedUrl({
+          action:  'read',
+          expires: Date.now() + 2 * 60 * 60 * 1000,
+        });
+        publicPhotoUrl = signedPhotoUrl;
+        functions.logger.info('[generateAvatarVideo] Step 3b Photo signed URL obtained (length:', publicPhotoUrl.length, ')');
+      } else {
+        functions.logger.info('[generateAvatarVideo] Step 3b Using original photoUrl (no extraction possible)');
       }
     } catch (photoErr: any) {
       functions.logger.warn('[generateAvatarVideo] Step 3b Photo URL fix failed, using original:', String(photoErr?.message));
-      // Continue with original photoUrl — may still work if token is valid
+      // Continue with original photoUrl
     }
 
     // ── Step 4: Create D-ID talking avatar video ──────────────────────────────
     let videoUrl = '';
+    let usedAuthKey = '';
     try {
       const didKey = DID_API_KEY.value();
       if (!didKey) throw new Error('DID_API_KEY secret is empty');
 
-      // D-ID key format per docs: "API_USER:API_PASSWORD" used directly as Basic value
-      // Try direct first; if 401, try base64-encoded version
-      functions.logger.info('[generateAvatarVideo] Step 4 D-ID: photoUrl=', publicPhotoUrl.slice(0, 80));
-      functions.logger.info('[generateAvatarVideo] Step 4 D-ID: audioUrl=', audioUrl.slice(0, 80));
+      functions.logger.info('[generateAvatarVideo] Step 4 D-ID start');
+      functions.logger.info('[generateAvatarVideo] photoUrl type:', photoUrl.startsWith('https://') ? 'HTTPS' : photoUrl.startsWith('gs://') ? 'GCS' : 'OTHER');
+      functions.logger.info('[generateAvatarVideo] publicPhotoUrl length:', publicPhotoUrl.length, 'starts:', publicPhotoUrl.slice(0, 50));
+      functions.logger.info('[generateAvatarVideo] audioUrl length:', audioUrl.length, 'starts:', audioUrl.slice(0, 50));
+      functions.logger.info('[generateAvatarVideo] DID_API_KEY length:', didKey.length, 'has colon:', didKey.includes(':'));
 
-      const tryDID = async (authValue: string): Promise<{ ok: boolean; status: number; body: string }> => {
+      // D-ID Basic auth: key from D-ID Studio is ALREADY in format "API_USER:API_PASSWORD"
+      // Use it DIRECTLY as the Basic auth value (do NOT base64 again — it's already base64)
+      // BUT: some older key formats need re-encoding. Try both.
+
+      const didPayload = {
+        source_url: publicPhotoUrl,
+        script: { type: 'audio', audio_url: audioUrl },
+        config: { fluent: true, pad_audio: 0.5, stitch: true },
+      };
+
+      functions.logger.info('[generateAvatarVideo] D-ID payload:', JSON.stringify(didPayload).slice(0, 200));
+
+      const tryDID = async (authValue: string, label: string): Promise<{ ok: boolean; status: number; body: string }> => {
+        functions.logger.info(`[generateAvatarVideo] D-ID ${label}: Authorization: Basic ${authValue.slice(0, 20)}...`);
         const r = await fetch('https://api.d-id.com/talks', {
           method:  'POST',
           headers: {
@@ -948,74 +991,93 @@ export const generateAvatarVideo = onCall(
             'Content-Type':  'application/json',
             'Accept':        'application/json',
           },
-          body: JSON.stringify({
-            source_url: publicPhotoUrl,
-            script: { type: 'audio', audio_url: audioUrl },
-            config:  { fluent: true, pad_audio: 0.5, stitch: true },
-          }),
+          body: JSON.stringify(didPayload),
         });
-        return { ok: r.ok, status: r.status, body: await r.text() };
+        const body = await r.text();
+        functions.logger.info(`[generateAvatarVideo] D-ID ${label} → HTTP ${r.status}: ${body.slice(0, 300)}`);
+        return { ok: r.ok, status: r.status, body };
       };
 
-      // Attempt 1: key as-is (D-ID docs say use directly)
-      let createResult = await tryDID(didKey);
-      functions.logger.info(`[generateAvatarVideo] D-ID attempt1 HTTP ${createResult.status}: ${createResult.body.slice(0, 150)}`);
+      // Attempt 1: key as-is (D-ID Studio keys are base64 already: user:pass)
+      let createResult = await tryDID(didKey, 'attempt1-direct');
+      usedAuthKey = didKey;
 
-      // Attempt 2: if 401, try base64(key) — some API versions need this
+      // Attempt 2: if 401, try base64(key) — for raw "user:pass" format keys
       if (createResult.status === 401) {
         const b64Key = Buffer.from(didKey).toString('base64');
-        createResult = await tryDID(b64Key);
-        functions.logger.info(`[generateAvatarVideo] D-ID attempt2 (b64) HTTP ${createResult.status}: ${createResult.body.slice(0, 150)}`);
+        createResult = await tryDID(b64Key, 'attempt2-base64');
+        if (createResult.ok) usedAuthKey = b64Key;
+      }
+
+      // Attempt 3: if still 401, try base64(":" + key) — some D-ID versions use empty user
+      if (createResult.status === 401) {
+        const b64Key2 = Buffer.from(`:${didKey}`).toString('base64');
+        createResult = await tryDID(b64Key2, 'attempt3-base64-colon');
+        if (createResult.ok) usedAuthKey = b64Key2;
       }
 
       if (!createResult.ok) {
-        throw new Error(`D-ID create HTTP ${createResult.status}: ${createResult.body.slice(0, 300)}`);
+        throw new Error(`D-ID create failed HTTP ${createResult.status}: ${createResult.body.slice(0, 400)}`);
       }
 
       const createData = JSON.parse(createResult.body) as { id: string; status: string };
       const talkId     = createData.id;
-      const didAuth    = didKey; // reuse whichever worked (simplified — both use same key in polling)
-      functions.logger.info('[generateAvatarVideo] D-ID talk created:', talkId);
+      functions.logger.info('[generateAvatarVideo] D-ID talk created, id:', talkId, 'status:', createData.status);
 
-      // Poll for completion
-      let attempts = 0;
-      const MAX_ATTEMPTS = 40; // 40 × 3s = 120s max
+      // Poll for completion — use the auth key that WORKED for creation
+      let attempts  = 0;
+      const MAX_ATT = 40; // 40 × 3s = 120s max
 
-      while (attempts < MAX_ATTEMPTS) {
+      while (attempts < MAX_ATT) {
         await new Promise(r => setTimeout(r, 3000));
         attempts++;
 
-        const pollResp = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-          headers: { 'Authorization': `Basic ${didAuth}`, 'Accept': 'application/json' },
-        });
+        let pollBody = '';
+        try {
+          const pollResp = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+            headers: {
+              'Authorization': `Basic ${usedAuthKey}`,
+              'Accept':        'application/json',
+            },
+          });
+          pollBody = await pollResp.text();
 
-        if (!pollResp.ok) {
-          functions.logger.warn(`[generateAvatarVideo] D-ID poll ${attempts} HTTP ${pollResp.status}`);
-          continue;
-        }
+          if (!pollResp.ok) {
+            functions.logger.warn(`[generateAvatarVideo] D-ID poll ${attempts} HTTP ${pollResp.status}: ${pollBody.slice(0, 100)}`);
+            continue;
+          }
 
-        const pollData = await pollResp.json() as {
-          status: string; result_url?: string; error?: { description: string };
-        };
+          const pollData = JSON.parse(pollBody) as {
+            status: string; result_url?: string; error?: { description?: string; kind?: string };
+          };
 
-        functions.logger.info(`[generateAvatarVideo] D-ID poll ${attempts}: ${pollData.status}`);
+          functions.logger.info(`[generateAvatarVideo] D-ID poll ${attempts}: status=${pollData.status}`);
 
-        if (pollData.status === 'done' && pollData.result_url) {
-          videoUrl = pollData.result_url;
-          break;
-        }
-        if (pollData.status === 'error') {
-          throw new Error(`D-ID error: ${pollData.error?.description || 'unknown'}`);
+          if (pollData.status === 'done' && pollData.result_url) {
+            videoUrl = pollData.result_url;
+            functions.logger.info('[generateAvatarVideo] D-ID video DONE:', videoUrl);
+            break;
+          }
+          if (pollData.status === 'error') {
+            const errDesc = pollData.error?.description || pollData.error?.kind || 'unknown error';
+            throw new Error(`D-ID processing error: ${errDesc}`);
+          }
+        } catch (pollErr: any) {
+          // If it's our thrown error, re-throw; otherwise log and continue
+          if (String(pollErr?.message || '').startsWith('D-ID processing error:')) throw pollErr;
+          functions.logger.warn(`[generateAvatarVideo] D-ID poll ${attempts} exception:`, String(pollErr?.message || pollErr));
         }
       }
 
-      if (!videoUrl) throw new Error('D-ID timed out after 120s.');
+      if (!videoUrl) {
+        throw new Error(`D-ID timed out after ${MAX_ATT * 3}s (${MAX_ATT} polls).`);
+      }
 
     } catch (err: any) {
       const msg = String(err?.message || err);
       functions.logger.error('[generateAvatarVideo] Step 4 D-ID FAILED:', msg);
-      // GRACEFUL FALLBACK: return text answer without video — include error for debugging
-      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 4 (D-ID): ${msg.slice(0, 200)}` };
+      // GRACEFUL FALLBACK: return text answer without video
+      return { videoUrl: '', answerText, talkId: '', fallback: true, failStep: `Step 4 (D-ID): ${msg.slice(0, 300)}` };
     }
 
     functions.logger.info(`[generateAvatarVideo] ✅ Complete for ${ownerUid}: ${videoUrl}`);
