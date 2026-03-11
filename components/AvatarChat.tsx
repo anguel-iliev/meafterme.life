@@ -256,7 +256,7 @@ export default function AvatarChat({
 
           const result = await callFunction<{
             videoUrl: string; answerText: string; fallback?: boolean; failStep?: string;
-          }>('generateAvatarVideo', { question: q, ownerUid, ownerName, language: locale });
+          }>('generateAvatarVideoV2', { question: q, ownerUid, ownerName, language: locale });
           clearInterval(stepTimer);
 
           const { videoUrl, answerText, fallback, failStep } = result;
@@ -298,7 +298,7 @@ export default function AvatarChat({
           }]);
           try {
             const res = await callFunction<{ answer: string }>(
-              'queryAvatar',
+              'queryAvatarV2',
               { question: q, ownerUid, ownerName, language: locale, topK: 6 }
             );
             setMessages(prev => [...prev, {
@@ -319,7 +319,7 @@ export default function AvatarChat({
         setLoading(true);
         try {
           const res = await callFunction<{ answer: string; chunks: number }>(
-            'queryAvatar',
+            'queryAvatarV2',
             { question: q, ownerUid, ownerName, language: locale, topK: 6 }
           );
           setMessages(prev => [...prev, {

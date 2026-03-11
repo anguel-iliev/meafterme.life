@@ -274,7 +274,7 @@ export default function AvatarSetup({ user, ownerUid }: { user: AppUser; ownerUi
       await saveAvatarConfig(uid, preCfg);
 
       // Call Cloud Function via fetch (onRequest — bypasses Cloud Run IAM CORS issue)
-      const res = await callFunction<{ voiceId: string }>('cloneVoice', {
+      const res = await callFunction<{ voiceId: string }>('cloneVoiceV2', {
         audioStoragePath: audioItem.storagePath,
         voiceName:        `avatar_${uid.slice(0, 8)}`,
       });

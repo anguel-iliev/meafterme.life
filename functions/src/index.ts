@@ -393,7 +393,7 @@ export const transcribeAudio = onCall(
 // Body: { question, ownerUid, ownerName?, language?, topK? }
 // Response: { result: { answer, context, chunks } }
 // ═══════════════════════════════════════════════════════════════════════════════
-export const queryAvatar = onRequest(
+export const queryAvatarV2 = onRequest(
   {
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY],
     timeoutSeconds: 120,
@@ -522,7 +522,7 @@ export const queryAvatar = onRequest(
 // Body: { audioStoragePath, voiceName? }
 // Response: { result: { voiceId, status } }
 // ═══════════════════════════════════════════════════════════════════════════════
-export const cloneVoice = onRequest(
+export const cloneVoiceV2 = onRequest(
   {
     secrets: [ELEVENLABS_API_KEY],
     timeoutSeconds: 300,
@@ -616,7 +616,7 @@ export const cloneVoice = onRequest(
 // Body: { question, ownerUid, ownerName?, language? }
 // Response: { result: { videoUrl, answerText, talkId, fallback, failStep? } }
 // ═══════════════════════════════════════════════════════════════════════════════
-export const generateAvatarVideo = onRequest(
+export const generateAvatarVideoV2 = onRequest(
   {
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
     timeoutSeconds: 300,
@@ -949,7 +949,7 @@ export const generateAvatarVideo = onRequest(
 // Headers: Authorization: Bearer <firebase-id-token>
 // Response: { result: { status, results } }
 // ═══════════════════════════════════════════════════════════════════════════════
-export const pingAvatar = onRequest(
+export const pingAvatarV2 = onRequest(
   {
     secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY],
     timeoutSeconds: 30,
