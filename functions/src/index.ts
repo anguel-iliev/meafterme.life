@@ -386,7 +386,39 @@ export const transcribeAudio = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FUNCTION 4: queryAvatar — HTTPS onRequest (replaces onCall for CORS fix)
+// LEGACY STUBS: Keep old onCall exports so Firebase doesn't complain about
+// orphan functions. These redirect clients to use V2 endpoints.
+// The actual logic is in the V2 onRequest functions below.
+// DO NOT DELETE THESE — Firebase CLI blocks deployment if deployed functions
+// are missing from local source code.
+// ═══════════════════════════════════════════════════════════════════════════════
+export const queryAvatar = onCall(
+  { secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY], timeoutSeconds: 30, memory: '256MiB', cors: true },
+  async () => {
+    throw new HttpsError('unimplemented', 'Use queryAvatarV2 endpoint (onRequest).');
+  }
+);
+export const generateAvatarVideo = onCall(
+  { secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY], timeoutSeconds: 30, memory: '256MiB', cors: true },
+  async () => {
+    throw new HttpsError('unimplemented', 'Use generateAvatarVideoV2 endpoint (onRequest).');
+  }
+);
+export const cloneVoice = onCall(
+  { secrets: [ELEVENLABS_API_KEY], timeoutSeconds: 30, memory: '256MiB', cors: true },
+  async () => {
+    throw new HttpsError('unimplemented', 'Use cloneVoiceV2 endpoint (onRequest).');
+  }
+);
+export const pingAvatar = onCall(
+  { secrets: [OPENAI_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DID_API_KEY], timeoutSeconds: 30, memory: '256MiB', cors: true },
+  async () => {
+    throw new HttpsError('unimplemented', 'Use pingAvatarV2 endpoint (onRequest).');
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FUNCTION 4: queryAvatarV2 — HTTPS onRequest (replaces onCall for CORS fix)
 //
 // POST /queryAvatar
 // Headers: Authorization: Bearer <firebase-id-token>
