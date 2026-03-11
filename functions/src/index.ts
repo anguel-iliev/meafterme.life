@@ -800,6 +800,10 @@ export const generateAvatarVideoV2 = onRequest(
     }
 
     // ── Step 3: Upload audio to Firebase Storage ──────────────────────────────
+    // NOTE: Use makePublic() + direct storage.googleapis.com URL.
+    // getSignedUrl() requires iam.serviceAccounts.signBlob which is NOT granted
+    // to the default Cloud Run service account. makePublic() sets the ACL on the
+    // object itself and works with Firebase Storage Rules (public read allowed).
     let audioUrl = '';
     try {
       const bucket    = gcs.bucket();
@@ -810,12 +814,23 @@ export const generateAvatarVideoV2 = onRequest(
         metadata: { cacheControl: 'public, max-age=3600' },
       });
 
-      const [signedAudioUrl] = await audioFile.getSignedUrl({
-        action:  'read',
-        expires: Date.now() + 2 * 60 * 60 * 1000,
-      });
-      audioUrl = signedAudioUrl;
-      functions.logger.info('[generateAvatarVideo] Step 3 Audio uploaded, signed URL length:', audioUrl.length);
+      // Make the file publicly readable (no signBlob needed)
+      try {
+        await audioFile.makePublic();
+        audioUrl = `https://storage.googleapis.com/${bucket.name}/${audioPath}`;
+        functions.logger.info('[generateAvatarVideo] Step 3 Audio public URL:', audioUrl);
+      } catch (makePublicErr: any) {
+        // Fallback: try Firebase Storage download URL (requires token but D-ID may reject it)
+        // Use the metadata token approach
+        const [meta] = await audioFile.getMetadata();
+        const token = (meta as any).metadata?.firebaseStorageDownloadTokens;
+        if (token) {
+          audioUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(audioPath)}?alt=media&token=${token}`;
+          functions.logger.info('[generateAvatarVideo] Step 3 Audio fallback download URL (token):', audioUrl.slice(0, 100));
+        } else {
+          throw new Error(`makePublic failed and no download token: ${String(makePublicErr?.message || makePublicErr)}`);
+        }
+      }
     } catch (err: any) {
       const msg = String(err?.message || err);
       functions.logger.error('[generateAvatarVideo] Step 3 Storage FAILED:', msg);
@@ -823,6 +838,8 @@ export const generateAvatarVideoV2 = onRequest(
     }
 
     // ── Step 3b: Get accessible photo URL for D-ID ────────────────────────────
+    // Same fix: use makePublic() instead of getSignedUrl() to avoid signBlob error.
+    // avatar_photos/ already has public read in storage.rules.
     let publicPhotoUrl = photoUrl;
     try {
       const bucket2 = gcs.bucket();
@@ -834,18 +851,31 @@ export const generateAvatarVideoV2 = onRequest(
         const match = photoUrl.match(/\/o\/([^?]+)/);
         storagePath = match ? decodeURIComponent(match[1]) : '';
       } else if (photoUrl.includes('storage.googleapis.com')) {
-        const match = photoUrl.match(/storage\.googleapis\.com\/[^/]+\/(.+)/);
-        storagePath = match ? match[1] : '';
+        // Already a public storage.googleapis.com URL — use as-is
+        storagePath = '';
+        // Keep publicPhotoUrl = photoUrl (already set above)
       }
 
       if (storagePath) {
         const photoFile = bucket2.file(storagePath);
-        const [signedPhotoUrl] = await photoFile.getSignedUrl({
-          action:  'read',
-          expires: Date.now() + 2 * 60 * 60 * 1000,
-        });
-        publicPhotoUrl = signedPhotoUrl;
-        functions.logger.info('[generateAvatarVideo] Step 3b Photo signed URL obtained');
+        try {
+          await photoFile.makePublic();
+          publicPhotoUrl = `https://storage.googleapis.com/${bucket2.name}/${storagePath}`;
+          functions.logger.info('[generateAvatarVideo] Step 3b Photo made public:', publicPhotoUrl.slice(0, 100));
+        } catch (makePublicErr: any) {
+          // Fallback: try to get the download token from metadata
+          const [meta] = await photoFile.getMetadata();
+          const token = (meta as any).metadata?.firebaseStorageDownloadTokens;
+          if (token) {
+            publicPhotoUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket2.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
+            functions.logger.info('[generateAvatarVideo] Step 3b Photo fallback token URL');
+          } else {
+            functions.logger.warn('[generateAvatarVideo] Step 3b makePublic failed, using original photoUrl. Error:', String(makePublicErr?.message));
+            // publicPhotoUrl stays as original photoUrl
+          }
+        }
+      } else if (!photoUrl.includes('storage.googleapis.com')) {
+        functions.logger.info('[generateAvatarVideo] Step 3b Cannot extract storage path, using photoUrl as-is');
       }
     } catch (photoErr: any) {
       functions.logger.warn('[generateAvatarVideo] Step 3b Photo URL fix failed, using original:', String(photoErr?.message));
