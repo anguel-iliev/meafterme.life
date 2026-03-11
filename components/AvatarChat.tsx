@@ -1,6 +1,8 @@
 'use client';
 /**
- * AvatarChat v4 — Clean pipeline, Anthropic/Claude only
+ * AvatarChat v5 — onRequest fetch() architecture (CORS fix)
+ * Uses fetch() + Firebase ID token instead of httpsCallable()
+ * This bypasses the Cloud Run IAM allUsers invoker CORS issue.
  *
  * ══ PIPELINE ══
  *
@@ -46,7 +48,36 @@ import { useLang } from '@/components/LangContext';
 import type { AppUser, AvatarConfig } from '@/lib/clientStore';
 import { waitForAuthReady, getAvatarConfig } from '@/lib/clientStore';
 import { isFirebaseClientConfigured, getFirebaseApp } from '@/lib/firebaseClient';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getAuth } from 'firebase/auth';
+
+// ─── Cloud Functions base URL ─────────────────────────────────────────────────
+const CF_BASE = 'https://us-central1-meafterme-d0347.cloudfunctions.net';
+
+// ─── Helper: call onRequest Firebase Function with auth token ─────────────────
+async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const app   = getFirebaseApp();
+  const fbAuth = getAuth(app);
+  const currentUser = fbAuth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+
+  const token = await currentUser.getIdToken();
+  const resp  = await fetch(`${CF_BASE}/${name}`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = await resp.json();
+  if (!resp.ok) {
+    const msg = json?.error?.message || `HTTP ${resp.status}`;
+    throw new Error(msg);
+  }
+  // onRequest functions return { result: ... }
+  return (json.result ?? json) as T;
+}
 
 // ─── i18n ──────────────────────────────────────────────────────────────────────
 const i18n = {
@@ -212,28 +243,23 @@ export default function AvatarChat({
     }
 
     try {
-      const fns = getFunctions(getFirebaseApp(), 'us-central1');
-
       if (isAvatarReady) {
         // ══ VIDEO MODE ══════════════════════════════════════════════════════
         setGenerating(true);
         setGenStep(1);
 
         try {
-          const genFn = httpsCallable<
-            { question: string; ownerUid: string; ownerName: string; language: string },
-            { videoUrl: string; answerText: string; fallback?: boolean; failStep?: string }
-          >(fns, 'generateAvatarVideo');
-
           // Simulate step progression (approximate timings)
           const stepTimer = setInterval(() => {
             setGenStep(s => Math.min(s + 1, 3));
           }, 8000);
 
-          const result = await genFn({ question: q, ownerUid, ownerName, language: locale });
+          const result = await callFunction<{
+            videoUrl: string; answerText: string; fallback?: boolean; failStep?: string;
+          }>('generateAvatarVideo', { question: q, ownerUid, ownerName, language: locale });
           clearInterval(stepTimer);
 
-          const { videoUrl, answerText, fallback, failStep } = result.data;
+          const { videoUrl, answerText, fallback, failStep } = result;
 
           if (videoUrl && !fallback) {
             // Full video response ✅
@@ -266,16 +292,19 @@ export default function AvatarChat({
         } catch (videoErr: any) {
           // Hard failure → fall back to queryAvatar (text only)
           console.error('[AvatarChat] generateAvatarVideo hard error:', videoErr);
+          setMessages(prev => [...prev, {
+            id: `fe-${Date.now()}`, role: 'avatar', error: true,
+            text: `⚠️ ${t.videoError}\n🔍 ${videoErr?.message ?? String(videoErr)}`,
+          }]);
           try {
-            const queryFn = httpsCallable<
-              { question: string; ownerUid: string; ownerName: string; language: string; topK: number },
-              { answer: string }
-            >(fns, 'queryAvatar');
-            const res = await queryFn({ question: q, ownerUid, ownerName, language: locale, topK: 6 });
+            const res = await callFunction<{ answer: string }>(
+              'queryAvatar',
+              { question: q, ownerUid, ownerName, language: locale, topK: 6 }
+            );
             setMessages(prev => [...prev, {
               id:   `tf-${Date.now()}`,
               role: 'avatar',
-              text: res.data.answer,
+              text: res.answer,
             }]);
           } catch (textErr: any) {
             handleFnError(textErr);
@@ -289,16 +318,14 @@ export default function AvatarChat({
         // ══ TEXT MODE ═══════════════════════════════════════════════════════
         setLoading(true);
         try {
-          const queryFn = httpsCallable<
-            { question: string; ownerUid: string; ownerName: string; language: string; topK: number },
-            { answer: string; chunks: number }
-          >(fns, 'queryAvatar');
-
-          const res = await queryFn({ question: q, ownerUid, ownerName, language: locale, topK: 6 });
+          const res = await callFunction<{ answer: string; chunks: number }>(
+            'queryAvatar',
+            { question: q, ownerUid, ownerName, language: locale, topK: 6 }
+          );
           setMessages(prev => [...prev, {
             id:   `a-${Date.now()}`,
             role: 'avatar',
-            text: res.data.answer,
+            text: res.answer,
           }]);
         } catch (err: any) {
           handleFnError(err);

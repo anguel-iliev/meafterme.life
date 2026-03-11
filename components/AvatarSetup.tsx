@@ -13,7 +13,25 @@ import { useLang } from '@/components/LangContext';
 import type { AppUser, MemoryItem, AvatarConfig } from '@/lib/clientStore';
 import { getMemoryItems, getAvatarConfig, saveAvatarConfig, waitForAuthReady } from '@/lib/clientStore';
 import { isFirebaseClientConfigured, getFirebaseApp } from '@/lib/firebaseClient';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getAuth } from 'firebase/auth';
+
+const CF_BASE = 'https://us-central1-meafterme-d0347.cloudfunctions.net';
+
+async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const app      = getFirebaseApp();
+  const fbAuth   = getAuth(app);
+  const currentUser = fbAuth.currentUser;
+  if (!currentUser) throw new Error('Not authenticated');
+  const token = await currentUser.getIdToken();
+  const resp  = await fetch(`${CF_BASE}/${name}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json?.error?.message || `HTTP ${resp.status}`);
+  return (json.result ?? json) as T;
+}
 
 // ─── i18n ─────────────────────────────────────────────────────────────────────
 const T = {
@@ -255,26 +273,20 @@ export default function AvatarSetup({ user, ownerUid }: { user: AppUser; ownerUi
       }
       await saveAvatarConfig(uid, preCfg);
 
-      // Call Cloud Function
-      const fns     = getFunctions(getFirebaseApp(), 'us-central1');
-      const cloneFn = httpsCallable<
-        { audioStoragePath: string; voiceName: string },
-        { voiceId: string }
-      >(fns, 'cloneVoice');
-
-      const res = await cloneFn({
+      // Call Cloud Function via fetch (onRequest — bypasses Cloud Run IAM CORS issue)
+      const res = await callFunction<{ voiceId: string }>('cloneVoice', {
         audioStoragePath: audioItem.storagePath,
         voiceName:        `avatar_${uid.slice(0, 8)}`,
       });
 
       await saveAvatarConfig(uid, {
-        voiceId:       res.data.voiceId,
+        voiceId:       res.voiceId,
         voiceStatus:   'ready',
         setupComplete: true,
       });
       setConfig(prev => ({
         ...(prev ?? { uid }),
-        voiceId:       res.data.voiceId,
+        voiceId:       res.voiceId,
         voiceStatus:   'ready',
         setupComplete: true,
       } as AvatarConfig));
